@@ -7,9 +7,32 @@ if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
     return()
 endif()
 
+set(_qsb_hints
+    "${QT_DIR}/../../../libexec"
+    "${QT_DIR}/../../../bin"
+    "${QT_DIR}/../../../share/qt/libexec")
 find_program(QSB_EXECUTABLE qsb
-    HINTS "${QT_DIR}/../../../libexec" "${QT_DIR}/../../../bin"
+    HINTS ${_qsb_hints}
     PATHS ENV PATH)
+
+if (NOT QSB_EXECUTABLE)
+    find_program(QTPATHS_EXECUTABLE
+        NAMES qtpaths6 qtpaths
+        HINTS "${QT_DIR}/../../../bin" "${QT_DIR}/../../../share/qt/bin"
+        PATHS ENV PATH)
+    if (QTPATHS_EXECUTABLE)
+        execute_process(
+            COMMAND ${QTPATHS_EXECUTABLE} --query QT_HOST_LIBEXECS
+            OUTPUT_VARIABLE QT_HOST_LIBEXECS
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if (QT_HOST_LIBEXECS)
+            find_program(QSB_EXECUTABLE qsb
+                HINTS "${QT_HOST_LIBEXECS}"
+                NO_DEFAULT_PATH)
+        endif()
+    endif()
+endif()
 
 if (QSB_EXECUTABLE)
     set(_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/shaders")

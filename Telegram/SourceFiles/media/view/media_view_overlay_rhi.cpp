@@ -130,11 +130,26 @@ OverlayWidget::RendererRhi::RendererRhi(not_null<OverlayWidget*> owner)
 	});
 }
 
+bool OverlayWidget::RendererRhi::Available() {
+	static const auto result = [] {
+		return LoadShader(u"argb32.vert"_q).isValid()
+			&& LoadShader(u"argb32.frag"_q).isValid()
+			&& LoadShader(u"controls.frag"_q).isValid()
+			&& LoadShader(u"static_content.frag"_q).isValid()
+			&& LoadShader(u"transparent_content.frag"_q).isValid()
+			&& LoadShader(u"fill.vert"_q).isValid()
+			&& LoadShader(u"rounded_corners.frag"_q).isValid()
+			&& LoadShader(u"yuv420_content.frag"_q).isValid()
+			&& LoadShader(u"nv12_content.frag"_q).isValid();
+	}();
+	return result;
+}
+
 void OverlayWidget::RendererRhi::initialize(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
-	if (_initialized && _rhi == rhi) {
+	if (_initialized && _rhi == rhi && _rt == rt) {
 		return;
 	}
 	releaseResources();
@@ -172,28 +187,35 @@ void OverlayWidget::RendererRhi::initialize(
 	_placeholderTexture = rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1));
 	_placeholderTexture->create();
 
-	createPipelines();
-	_initialized = true;
+	_initialized = createPipelines();
+	if (!_initialized) {
+		LOG(("RHI Overlay Error: Required shaders unavailable, disabling QRhi overlay."));
+		return;
+	}
 
 	LOG(("[RENDERER_TEST] component=overlay backend=%1 device=%2 status=OK")
 		.arg(rhi->backendName())
 		.arg(rhi->driverInfo().deviceName));
 }
 
-void OverlayWidget::RendererRhi::createPipelines() {
+bool OverlayWidget::RendererRhi::createPipelines() {
+	if (!Available()) {
+		return false;
+	}
 	const auto rpDesc = _rt->renderPassDescriptor();
 
 	const auto argb32Vert = LoadShader(u"argb32.vert"_q);
 	const auto argb32Frag = LoadShader(u"argb32.frag"_q);
 	const auto controlsFrag = LoadShader(u"controls.frag"_q);
 
-	auto *sampleSrb = _rhi->newShaderResourceBindings();
-	sampleSrb->setBindings({
-		QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+	_imageSrb = _rhi->newShaderResourceBindings();
+	_imageSrb->setBindings({
+		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage
 				| QRhiShaderResourceBinding::FragmentStage,
 			_uniformBuffer,
+			0,
 			sizeof(ImageUniforms)),
 		QRhiShaderResourceBinding::sampledTexture(
 			1,
@@ -201,8 +223,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	sampleSrb->create();
-	_perDrawSrbs.push_back(sampleSrb);
+	_imageSrb->create();
 
 	auto *imagePipeline = _rhi->newGraphicsPipeline();
 	imagePipeline->setShaderStages({
@@ -217,7 +238,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	});
 	imagePipeline->setVertexInputLayout(inputLayout);
 	imagePipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
-	imagePipeline->setShaderResourceBindings(sampleSrb);
+	imagePipeline->setShaderResourceBindings(_imageSrb);
 	imagePipeline->setRenderPassDescriptor(rpDesc);
 	imagePipeline->create();
 	_imagePipeline = imagePipeline;
@@ -236,7 +257,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
 	imageBlendPipeline->setTargetBlends({ blend });
 	imageBlendPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
-	imageBlendPipeline->setShaderResourceBindings(sampleSrb);
+	imageBlendPipeline->setShaderResourceBindings(_imageSrb);
 	imageBlendPipeline->setRenderPassDescriptor(rpDesc);
 	imageBlendPipeline->create();
 	_imageBlendPipeline = imageBlendPipeline;
@@ -245,8 +266,8 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	const auto transparentContentFrag = LoadShader(
 		u"transparent_content.frag"_q);
 
-	auto *contentSrb = _rhi->newShaderResourceBindings();
-	contentSrb->setBindings({
+	_contentSrb = _rhi->newShaderResourceBindings();
+	_contentSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage
@@ -265,8 +286,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	contentSrb->create();
-	_perDrawSrbs.push_back(contentSrb);
+	_contentSrb->create();
 
 	auto *staticPipeline = _rhi->newGraphicsPipeline();
 	staticPipeline->setShaderStages({
@@ -275,7 +295,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	});
 	staticPipeline->setVertexInputLayout(inputLayout);
 	staticPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
-	staticPipeline->setShaderResourceBindings(contentSrb);
+	staticPipeline->setShaderResourceBindings(_contentSrb);
 	staticPipeline->setRenderPassDescriptor(rpDesc);
 	staticPipeline->create();
 	_staticContentPipeline = staticPipeline;
@@ -288,13 +308,13 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	staticBlendPipeline->setVertexInputLayout(inputLayout);
 	staticBlendPipeline->setTargetBlends({ blend });
 	staticBlendPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
-	staticBlendPipeline->setShaderResourceBindings(contentSrb);
+	staticBlendPipeline->setShaderResourceBindings(_contentSrb);
 	staticBlendPipeline->setRenderPassDescriptor(rpDesc);
 	staticBlendPipeline->create();
 	_staticContentBlendPipeline = staticBlendPipeline;
 
-	auto *transparentSrb = _rhi->newShaderResourceBindings();
-	transparentSrb->setBindings({
+	_transparentContentSrb = _rhi->newShaderResourceBindings();
+	_transparentContentSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage
@@ -313,8 +333,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	transparentSrb->create();
-	_perDrawSrbs.push_back(transparentSrb);
+	_transparentContentSrb->create();
 
 	auto *transparentPipeline = _rhi->newGraphicsPipeline();
 	transparentPipeline->setShaderStages({
@@ -324,7 +343,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	transparentPipeline->setVertexInputLayout(inputLayout);
 	transparentPipeline->setTargetBlends({ blend });
 	transparentPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
-	transparentPipeline->setShaderResourceBindings(transparentSrb);
+	transparentPipeline->setShaderResourceBindings(_transparentContentSrb);
 	transparentPipeline->setRenderPassDescriptor(rpDesc);
 	transparentPipeline->create();
 	_transparentContentPipeline = transparentPipeline;
@@ -332,8 +351,8 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	const auto fillVert = LoadShader(u"fill.vert"_q);
 	const auto roundedCornersFrag = LoadShader(u"rounded_corners.frag"_q);
 
-	auto *roundedSrb = _rhi->newShaderResourceBindings();
-	roundedSrb->setBindings({
+	_roundedCornersSrb = _rhi->newShaderResourceBindings();
+	_roundedCornersSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage
@@ -342,8 +361,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 			0,
 			sizeof(RoundedCornersUniforms)),
 	});
-	roundedSrb->create();
-	_perDrawSrbs.push_back(roundedSrb);
+	_roundedCornersSrb->create();
 
 	QRhiVertexInputLayout fillInputLayout;
 	fillInputLayout.setBindings({ { 2 * sizeof(float) } });
@@ -366,7 +384,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	roundedPipeline->setVertexInputLayout(fillInputLayout);
 	roundedPipeline->setTargetBlends({ cornerBlend });
 	roundedPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
-	roundedPipeline->setShaderResourceBindings(roundedSrb);
+	roundedPipeline->setShaderResourceBindings(_roundedCornersSrb);
 	roundedPipeline->setRenderPassDescriptor(rpDesc);
 	roundedPipeline->create();
 	_roundedCornersPipeline = roundedPipeline;
@@ -374,8 +392,8 @@ void OverlayWidget::RendererRhi::createPipelines() {
 	const auto yuv420Frag = LoadShader(u"yuv420_content.frag"_q);
 	const auto nv12Frag = LoadShader(u"nv12_content.frag"_q);
 
-	auto *yuv420Srb = _rhi->newShaderResourceBindings();
-	yuv420Srb->setBindings({
+	_yuv420Srb = _rhi->newShaderResourceBindings();
+	_yuv420Srb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage
@@ -404,8 +422,7 @@ void OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	yuv420Srb->create();
-	_perDrawSrbs.push_back(yuv420Srb);
+	_yuv420Srb->create();
 
 	auto createYuvPipeline = [&](const QShader &frag, bool blending,
 			QRhiShaderResourceBindings *srb) {
@@ -425,11 +442,11 @@ void OverlayWidget::RendererRhi::createPipelines() {
 		return pipeline;
 	};
 
-	_yuv420Pipeline = createYuvPipeline(yuv420Frag, false, yuv420Srb);
-	_yuv420BlendPipeline = createYuvPipeline(yuv420Frag, true, yuv420Srb);
+	_yuv420Pipeline = createYuvPipeline(yuv420Frag, false, _yuv420Srb);
+	_yuv420BlendPipeline = createYuvPipeline(yuv420Frag, true, _yuv420Srb);
 
-	auto *nv12Srb = _rhi->newShaderResourceBindings();
-	nv12Srb->setBindings({
+	_nv12Srb = _rhi->newShaderResourceBindings();
+	_nv12Srb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
 			QRhiShaderResourceBinding::VertexStage
@@ -453,18 +470,18 @@ void OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	nv12Srb->create();
-	_perDrawSrbs.push_back(nv12Srb);
+	_nv12Srb->create();
 
-	_nv12Pipeline = createYuvPipeline(nv12Frag, false, nv12Srb);
-	_nv12BlendPipeline = createYuvPipeline(nv12Frag, true, nv12Srb);
+	_nv12Pipeline = createYuvPipeline(nv12Frag, false, _nv12Srb);
+	_nv12BlendPipeline = createYuvPipeline(nv12Frag, true, _nv12Srb);
+	return true;
 }
 
 void OverlayWidget::RendererRhi::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
-	if (_owner->_hideWorkaround) {
+	if (!_initialized || _owner->_hideWorkaround) {
 		return;
 	}
 	_rhi = rhi;
@@ -472,10 +489,7 @@ void OverlayWidget::RendererRhi::render(
 	_cb = cb;
 	_nextVertexSlot = 0;
 	_nextPoolIndex = 0;
-	for (auto *srb : _perDrawSrbs) {
-		delete srb;
-	}
-	_perDrawSrbs.clear();
+	_nextSrbIndex = 0;
 	_drawCommands.clear();
 
 	const auto size = rt->pixelSize();
@@ -601,6 +615,19 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	delete _nv12BlendPipeline;
 	_nv12BlendPipeline = nullptr;
 
+	delete _imageSrb;
+	_imageSrb = nullptr;
+	delete _contentSrb;
+	_contentSrb = nullptr;
+	delete _transparentContentSrb;
+	_transparentContentSrb = nullptr;
+	delete _roundedCornersSrb;
+	_roundedCornersSrb = nullptr;
+	delete _yuv420Srb;
+	_yuv420Srb = nullptr;
+	delete _nv12Srb;
+	_nv12Srb = nullptr;
+
 	for (auto &tex : _storiesSiblingTextures) {
 		delete tex;
 		tex = nullptr;
@@ -621,6 +648,7 @@ void OverlayWidget::RendererRhi::releaseResources() {
 		delete srb;
 	}
 	_perDrawSrbs.clear();
+	_nextSrbIndex = 0;
 
 	for (auto &tex : _rgbaTextures) {
 		delete tex;
@@ -655,6 +683,16 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_sampler = nullptr;
 
 	_initialized = false;
+}
+
+QRhiShaderResourceBindings *OverlayWidget::RendererRhi::allocateSrb() {
+	if (_nextSrbIndex < int(_perDrawSrbs.size())) {
+		return _perDrawSrbs[_nextSrbIndex++];
+	}
+	auto *srb = _rhi->newShaderResourceBindings();
+	_perDrawSrbs.push_back(srb);
+	++_nextSrbIndex;
+	return srb;
 }
 
 QColor OverlayWidget::RendererRhi::rhiClearColor() {
@@ -700,7 +738,7 @@ void OverlayWidget::RendererRhi::drawTexturedQuad(
 	_rub->updateDynamicBuffer(
 		_uniformBuffer, uOffset, sizeof(ImageUniforms), &uniforms);
 
-	auto *srb = _rhi->newShaderResourceBindings();
+	auto *srb = allocateSrb();
 	srb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
@@ -716,7 +754,6 @@ void OverlayWidget::RendererRhi::drawTexturedQuad(
 			_sampler),
 	});
 	srb->create();
-	_perDrawSrbs.push_back(srb);
 
 	_drawCommands.push_back({
 		.pipeline = blend ? _imageBlendPipeline : pipeline,
@@ -939,7 +976,7 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 			&uniforms);
 	}
 
-	auto *srb = _rhi->newShaderResourceBindings();
+	auto *srb = allocateSrb();
 	srb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
 			0,
@@ -964,7 +1001,6 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 			_sampler),
 	});
 	srb->create();
-	_perDrawSrbs.push_back(srb);
 
 	_drawCommands.push_back({
 		.pipeline = pipeline,
@@ -1208,7 +1244,7 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 		_uniformBuffer, uOffset, sizeof(ContentUniforms), &uniforms);
 
 	const auto blendEnabled = (geometry.roundRadius > 0.);
-	auto *srb = _rhi->newShaderResourceBindings();
+	auto *srb = allocateSrb();
 	if (nv12) {
 		srb->setBindings({
 			QRhiShaderResourceBinding::uniformBuffer(
@@ -1270,7 +1306,6 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 		});
 	}
 	srb->create();
-	_perDrawSrbs.push_back(srb);
 
 	auto *pipeline = nv12
 		? (blendEnabled ? _nv12BlendPipeline : _nv12Pipeline)
@@ -1726,7 +1761,7 @@ void OverlayWidget::RendererRhi::paintRoundedCorners(int radius) {
 			sizeof(RoundedCornersUniforms),
 			&uniforms);
 
-		auto *srb = _rhi->newShaderResourceBindings();
+		auto *srb = allocateSrb();
 		srb->setBindings({
 			QRhiShaderResourceBinding::uniformBuffer(
 				0,
@@ -1737,7 +1772,6 @@ void OverlayWidget::RendererRhi::paintRoundedCorners(int radius) {
 				sizeof(RoundedCornersUniforms)),
 		});
 		srb->create();
-		_perDrawSrbs.push_back(srb);
 
 		_drawCommands.push_back({
 			.pipeline = _roundedCornersPipeline,

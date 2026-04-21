@@ -5749,7 +5749,8 @@ void OverlayWidget::tryStartTextRecognition() {
 Ui::GL::ChosenRenderer OverlayWidget::chooseRenderer(
 		Ui::GL::Backend backend) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (backend == Ui::GL::Backend::QRhi) {
+	if (backend == Ui::GL::Backend::QRhi
+		&& RendererRhi::Available()) {
 		_opengl = true;
 		return {
 			.renderer = std::make_unique<RendererRhi>(this),
@@ -5757,13 +5758,16 @@ Ui::GL::ChosenRenderer OverlayWidget::chooseRenderer(
 		};
 	}
 #endif // Qt >= 6.7
-	_opengl = (backend == Ui::GL::Backend::OpenGL);
+	const auto fallback = (backend == Ui::GL::Backend::QRhi)
+		? Ui::GL::Backend::Raster
+		: backend;
+	_opengl = (fallback == Ui::GL::Backend::OpenGL);
 	return {
 		.renderer = (_opengl
 			? std::unique_ptr<Ui::GL::Renderer>(
 				std::make_unique<RendererGL>(this))
 			: std::make_unique<RendererSW>(this)),
-		.backend = backend,
+		.backend = fallback,
 	};
 }
 

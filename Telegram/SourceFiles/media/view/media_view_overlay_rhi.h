@@ -35,6 +35,7 @@ class OverlayWidget::RendererRhi final
 public:
 	explicit RendererRhi(not_null<OverlayWidget*> owner);
 	~RendererRhi();
+	[[nodiscard]] static bool Available();
 
 	void initialize(
 		QRhi *rhi,
@@ -95,7 +96,7 @@ private:
 		not_null<const style::icon*> icon;
 	};
 
-	void createPipelines();
+	[[nodiscard]] bool createPipelines();
 	void validateControlsFade();
 	void validateControls();
 	void invalidateControls();
@@ -119,6 +120,7 @@ private:
 		float *shadowTopRect,
 		float *shadowBottomSkipOpacityFullFade,
 		ContentGeometry geometry) const;
+	[[nodiscard]] QRhiShaderResourceBindings *allocateSrb();
 
 	void paintUsingRaster(
 		QRect rect,
@@ -164,6 +166,13 @@ private:
 	QRhiGraphicsPipeline *_nv12Pipeline = nullptr;
 	QRhiGraphicsPipeline *_nv12BlendPipeline = nullptr;
 
+	QRhiShaderResourceBindings *_imageSrb = nullptr;
+	QRhiShaderResourceBindings *_contentSrb = nullptr;
+	QRhiShaderResourceBindings *_transparentContentSrb = nullptr;
+	QRhiShaderResourceBindings *_roundedCornersSrb = nullptr;
+	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
+	QRhiShaderResourceBindings *_nv12Srb = nullptr;
+
 	struct DrawCommand {
 		QRhiGraphicsPipeline *pipeline = nullptr;
 		QRhiShaderResourceBindings *srb = nullptr;
@@ -172,6 +181,7 @@ private:
 	};
 	std::vector<DrawCommand> _drawCommands;
 	std::vector<QRhiShaderResourceBindings*> _perDrawSrbs;
+	int _nextSrbIndex = 0;
 	int _nextVertexSlot = 0;
 
 	QRhiTexture *_rgbaTextures[3] = {};
