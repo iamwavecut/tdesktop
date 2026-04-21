@@ -135,6 +135,21 @@ static_assert(sizeof(ImageUniforms) == 16);
 
 } // namespace
 
+bool Viewport::RendererRhi::Available() {
+	static const auto result = [] {
+		return LoadShader(u"passthrough.vert"_q).isValid()
+			&& LoadShader(u"argb32.vert"_q).isValid()
+			&& LoadShader(u"group_frame.vert"_q).isValid()
+			&& LoadShader(u"argb32.frag"_q).isValid()
+			&& LoadShader(u"yuv420.frag"_q).isValid()
+			&& LoadShader(u"blur_h.frag"_q).isValid()
+			&& LoadShader(u"blur_v.frag"_q).isValid()
+			&& LoadShader(u"group_frame.frag"_q).isValid()
+			&& LoadShader(u"controls.frag"_q).isValid();
+	}();
+	return result;
+}
+
 Viewport::RendererRhi::RendererRhi(not_null<Viewport*> owner)
 : _owner(owner)
 , _pinIcon(st::groupCallVideoTile.pin)
@@ -227,12 +242,24 @@ void Viewport::RendererRhi::initialize(
 	_placeholderTexture = rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1));
 	_placeholderTexture->create();
 
-	createPipelines();
-	_initialized = true;
+	_initialized = createPipelines();
+	if (!_initialized) {
+		releaseResources();
+	}
 }
 
-void Viewport::RendererRhi::createPipelines() {
+bool Viewport::RendererRhi::createPipelines() {
+	if (!Available()) {
+		return false;
+	}
 	const auto rpDesc = _rt->renderPassDescriptor();
+	const auto createPipeline = [](QRhiGraphicsPipeline *pipeline) {
+		if (!pipeline->create()) {
+			delete pipeline;
+			return static_cast<QRhiGraphicsPipeline*>(nullptr);
+		}
+		return pipeline;
+	};
 
 	const auto passthroughVert = LoadShader(u"passthrough.vert"_q);
 	const auto argb32Vert = LoadShader(u"argb32.vert"_q);
@@ -276,7 +303,9 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_linearSampler),
 	});
-	_downscaleArgb32Srb->create();
+	if (!_downscaleArgb32Srb->create()) {
+		return false;
+	}
 
 	// Downscale YUV420: passthrough vert + yuv420 frag
 	// yuv420.frag needs: y_texture(1), u_texture(2), v_texture(3)
@@ -298,7 +327,9 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_linearSampler),
 	});
-	_downscaleYuv420Srb->create();
+	if (!_downscaleYuv420Srb->create()) {
+		return false;
+	}
 
 	// Blur H: passthrough vert + blur_h frag
 	// blur_h.frag needs: BlurParams at binding 0, b_texture at binding 1
@@ -316,7 +347,9 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_nearestSampler),
 	});
-	_blurHSrb->create();
+	if (!_blurHSrb->create()) {
+		return false;
+	}
 
 	{
 		auto *tex = _rhi->newTexture(
@@ -324,13 +357,20 @@ void Viewport::RendererRhi::createPipelines() {
 			QSize(1, 1),
 			1,
 			QRhiTexture::RenderTarget);
-		tex->create();
+		if (!tex->create()) {
+			delete tex;
+			return false;
+		}
 		auto colorAtt = QRhiColorAttachment(tex);
 		auto *offscreenRT = _rhi->newTextureRenderTarget(
 			QRhiTextureRenderTargetDescription(colorAtt));
 		_offscreenRpDesc = offscreenRT->newCompatibleRenderPassDescriptor();
 		offscreenRT->setRenderPassDescriptor(_offscreenRpDesc);
-		offscreenRT->create();
+		if (!offscreenRT->create()) {
+			delete offscreenRT;
+			delete tex;
+			return false;
+		}
 		delete offscreenRT;
 		delete tex;
 	}
@@ -345,7 +385,10 @@ void Viewport::RendererRhi::createPipelines() {
 		QRhiGraphicsPipeline::TriangleStrip);
 	_downscaleArgb32Pipeline->setShaderResourceBindings(_downscaleArgb32Srb);
 	_downscaleArgb32Pipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_downscaleArgb32Pipeline->create();
+	_downscaleArgb32Pipeline = createPipeline(_downscaleArgb32Pipeline);
+	if (!_downscaleArgb32Pipeline) {
+		return false;
+	}
 
 	_downscaleYuv420Pipeline = _rhi->newGraphicsPipeline();
 	_downscaleYuv420Pipeline->setShaderStages({
@@ -358,7 +401,10 @@ void Viewport::RendererRhi::createPipelines() {
 	_downscaleYuv420Pipeline->setShaderResourceBindings(
 		_downscaleYuv420Srb);
 	_downscaleYuv420Pipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_downscaleYuv420Pipeline->create();
+	_downscaleYuv420Pipeline = createPipeline(_downscaleYuv420Pipeline);
+	if (!_downscaleYuv420Pipeline) {
+		return false;
+	}
 
 	_blurHPipeline = _rhi->newGraphicsPipeline();
 	_blurHPipeline->setShaderStages({
@@ -369,7 +415,10 @@ void Viewport::RendererRhi::createPipelines() {
 	_blurHPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_blurHPipeline->setShaderResourceBindings(_blurHSrb);
 	_blurHPipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_blurHPipeline->create();
+	_blurHPipeline = createPipeline(_blurHPipeline);
+	if (!_blurHPipeline) {
+		return false;
+	}
 
 	_blurVPipeline = _rhi->newGraphicsPipeline();
 	_blurVPipeline->setShaderStages({
@@ -380,7 +429,10 @@ void Viewport::RendererRhi::createPipelines() {
 	_blurVPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_blurVPipeline->setShaderResourceBindings(_blurHSrb);
 	_blurVPipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_blurVPipeline->create();
+	_blurVPipeline = createPipeline(_blurVPipeline);
+	if (!_blurVPipeline) {
+		return false;
+	}
 
 	// Frame composite: group_frame vert + group_frame frag (on-screen)
 	// group_frame.frag needs: uniform block(0), s_texture(1),
@@ -410,7 +462,10 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_noiseRepeatSampler),
 	});
-	frameSrb->create();
+	if (!frameSrb->create()) {
+		delete frameSrb;
+		return false;
+	}
 	_perDrawSrbs.push_back(frameSrb);
 
 	_framePipeline = _rhi->newGraphicsPipeline();
@@ -422,7 +477,10 @@ void Viewport::RendererRhi::createPipelines() {
 	_framePipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_framePipeline->setShaderResourceBindings(frameSrb);
 	_framePipeline->setRenderPassDescriptor(rpDesc);
-	_framePipeline->create();
+	_framePipeline = createPipeline(_framePipeline);
+	if (!_framePipeline) {
+		return false;
+	}
 
 	// Controls: argb32 vert + controls frag (blending on-screen)
 	auto *controlsSrb = _rhi->newShaderResourceBindings();
@@ -440,7 +498,10 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_linearSampler),
 	});
-	controlsSrb->create();
+	if (!controlsSrb->create()) {
+		delete controlsSrb;
+		return false;
+	}
 	_perDrawSrbs.push_back(controlsSrb);
 
 	QRhiGraphicsPipeline::TargetBlend blend;
@@ -460,7 +521,8 @@ void Viewport::RendererRhi::createPipelines() {
 	_controlsPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_controlsPipeline->setShaderResourceBindings(controlsSrb);
 	_controlsPipeline->setRenderPassDescriptor(rpDesc);
-	_controlsPipeline->create();
+	_controlsPipeline = createPipeline(_controlsPipeline);
+	return (_controlsPipeline != nullptr);
 }
 
 void Viewport::RendererRhi::releaseResources() {
@@ -545,6 +607,12 @@ void Viewport::RendererRhi::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!_initialized) {
+		auto *rub = rhi->nextResourceUpdateBatch();
+		cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, rub);
+		cb->endPass();
+		return;
+	}
 	renderOffscreen(rhi, rt, cb);
 
 	// Prepare onscreen: accumulate all resource updates into _rub.
@@ -578,6 +646,9 @@ void Viewport::RendererRhi::renderOffscreen(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!_initialized) {
+		return;
+	}
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -618,6 +689,9 @@ void Viewport::RendererRhi::renderOnscreen(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!_initialized) {
+		return;
+	}
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -996,7 +1070,9 @@ void Viewport::RendererRhi::drawYuv2RgbPass(
 			tileData.vTexture,
 			_linearSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_cb->beginPass(
 		tileData.convertedRt, Qt::black, { 1.0f, 0 }, _rub);
@@ -1045,7 +1121,9 @@ void Viewport::RendererRhi::drawDownscalePass(
 			srcTexture,
 			_linearSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_cb->beginPass(tileData.downscaleRt, Qt::black, { 1.0f, 0 }, _rub);
 	_rub = nullptr;
@@ -1093,7 +1171,9 @@ void Viewport::RendererRhi::drawBlurPass(
 				tileData.downscaleTexture,
 				_nearestSampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 
 		_cb->beginPass(
 			tileData.blurHRt, Qt::black, { 1.0f, 0 }, rub);
@@ -1129,7 +1209,9 @@ void Viewport::RendererRhi::drawBlurPass(
 				tileData.blurHTexture,
 				_nearestSampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 
 		_cb->beginPass(
 			tileData.blurVRt, Qt::black, { 1.0f, 0 }, rub);
@@ -1315,7 +1397,9 @@ void Viewport::RendererRhi::drawFramePass(
 			_noiseTexture ? _noiseTexture : _placeholderTexture,
 			_noiseRepeatSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_onscreenDraws.push_back({ _framePipeline, srb, vOffset });
 }
@@ -1572,7 +1656,9 @@ void Viewport::RendererRhi::paintUsingRaster(
 			tex,
 			_linearSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_onscreenDraws.push_back({ _controlsPipeline, srb, vOffset });
 }

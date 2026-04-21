@@ -39,6 +39,8 @@ public:
 	ThanosEffectRenderer();
 	~ThanosEffectRenderer();
 
+	[[nodiscard]] static bool Available();
+
 	void initialize(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
@@ -81,7 +83,7 @@ private:
 		bool particlesInitialized = false;
 	};
 
-	void createPipelines(QRhiRenderTarget *rt);
+	[[nodiscard]] bool createPipelines(QRhiRenderTarget *rt);
 	void addPendingItems(QRhiCommandBuffer *cb);
 	AnimatingItem createAnimatingItem(ThanosItem &&item);
 	void destroyAnimatingItem(AnimatingItem &item);

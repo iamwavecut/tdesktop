@@ -40,6 +40,7 @@ struct CornerButton {
 
 enum class CornerButtonType {
 	Down,
+	SummarizeDown,
 	Mentions,
 	Reactions,
 	PollVotes,
@@ -119,6 +120,7 @@ private:
 	rpl::lifetime _stLifetime;
 
 	CornerButton _down;
+	CornerButton _summarizeDown;
 	CornerButton _mentions;
 	CornerButton _reactions;
 	CornerButton _pollVotes;
@@ -127,6 +129,7 @@ private:
 	QVector<FullMsgId> _replyReturns;
 
 	bool _replyReturnStarted = false;
+	int _unreadCount = 0;
 
 };
 

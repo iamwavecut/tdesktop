@@ -895,13 +895,17 @@ void Viewport::setPressed(Selection value) {
 
 Ui::GL::ChosenRenderer Viewport::chooseRenderer(Ui::GL::Backend backend) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (backend == Ui::GL::Backend::QRhi) {
+	if (backend == Ui::GL::Backend::QRhi
+		&& RendererRhi::Available()) {
 		_opengl = true;
 		_qrhi = true;
 		return {
 			.renderer = std::make_unique<RendererRhi>(this),
 			.backend = Ui::GL::Backend::QRhi,
 		};
+	}
+	if (backend == Ui::GL::Backend::QRhi) {
+		backend = Ui::GL::Backend::OpenGL;
 	}
 #else
 	if (backend == Ui::GL::Backend::QRhi) {

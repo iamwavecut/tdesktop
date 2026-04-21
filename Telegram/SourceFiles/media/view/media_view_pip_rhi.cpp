@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 
+#include "base/debug_log.h"
 #include "ui/rhi/rhi_shader.h"
 #include "ui/widgets/shadow.h"
 #include "media/streaming/media_streaming_common.h"
@@ -100,7 +101,10 @@ static_assert(sizeof(ImageUniforms) % 16 == 0);
 	pipeline->setTopology(topology);
 	pipeline->setShaderResourceBindings(srb);
 	pipeline->setRenderPassDescriptor(rpDesc);
-	pipeline->create();
+	if (!pipeline->create()) {
+		delete pipeline;
+		return nullptr;
+	}
 
 	return pipeline;
 }
@@ -120,6 +124,20 @@ Pip::RendererRhi::RendererRhi(not_null<Pip*> owner)
 
 Pip::RendererRhi::~RendererRhi() {
 	releaseResources();
+}
+
+bool Pip::RendererRhi::Available() {
+	static const auto result = [] {
+		return LoadShader(u"argb32.vert"_q).isValid()
+			&& LoadShader(u"passthrough.vert"_q).isValid()
+			&& LoadShader(u"argb32.frag"_q).isValid()
+			&& LoadShader(u"pip_argb32.frag"_q).isValid()
+			&& LoadShader(u"pip_controls.frag"_q).isValid()
+			&& LoadShader(u"pip_controls.vert"_q).isValid()
+			&& LoadShader(u"pip_yuv420.frag"_q).isValid()
+			&& LoadShader(u"pip_nv12.frag"_q).isValid();
+	}();
+	return result;
 }
 
 void Pip::RendererRhi::initialize(
@@ -158,12 +176,18 @@ void Pip::RendererRhi::initialize(
 	_placeholderTexture = rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1));
 	_placeholderTexture->create();
 
-	createPipelines();
+	_initialized = createPipelines();
+	if (!_initialized) {
+		LOG(("RHI PiP Error: Required shaders unavailable or pipeline creation failed, disabling QRhi PiP."));
+		return;
+	}
 	createShadowTexture();
-	_initialized = true;
 }
 
-void Pip::RendererRhi::createPipelines() {
+bool Pip::RendererRhi::createPipelines() {
+	if (!Available()) {
+		return false;
+	}
 	const auto rpDesc = _rt->renderPassDescriptor();
 
 	const auto argb32Vert = LoadShader(u"argb32.vert"_q);
@@ -190,7 +214,9 @@ void Pip::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_argb32Srb->create();
+	if (!_argb32Srb->create()) {
+		return false;
+	}
 
 	_argb32Pipeline = CreatePipeline(
 		_rhi,
@@ -200,6 +226,9 @@ void Pip::RendererRhi::createPipelines() {
 		pipArgb32Frag,
 		false,
 		4 * sizeof(float));
+	if (!_argb32Pipeline) {
+		return false;
+	}
 
 	_imageSrb = _rhi->newShaderResourceBindings();
 	_imageSrb->setBindings({
@@ -214,7 +243,9 @@ void Pip::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_imageSrb->create();
+	if (!_imageSrb->create()) {
+		return false;
+	}
 
 	_imagePipeline = CreatePipeline(
 		_rhi,
@@ -224,6 +255,9 @@ void Pip::RendererRhi::createPipelines() {
 		argb32Frag,
 		false,
 		4 * sizeof(float));
+	if (!_imagePipeline) {
+		return false;
+	}
 
 	_imageBlendPipeline = CreatePipeline(
 		_rhi,
@@ -233,6 +267,9 @@ void Pip::RendererRhi::createPipelines() {
 		argb32Frag,
 		true,
 		4 * sizeof(float));
+	if (!_imageBlendPipeline) {
+		return false;
+	}
 
 	const auto pipControlsVert = LoadShader(u"pip_controls.vert"_q);
 	_controlsSrb = _rhi->newShaderResourceBindings();
@@ -248,7 +285,9 @@ void Pip::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_controlsSrb->create();
+	if (!_controlsSrb->create()) {
+		return false;
+	}
 
 	_controlsPipeline = CreatePipeline(
 		_rhi,
@@ -259,6 +298,9 @@ void Pip::RendererRhi::createPipelines() {
 		true,
 		6 * sizeof(float),
 		3);
+	if (!_controlsPipeline) {
+		return false;
+	}
 
 	const auto pipYuv420Frag = LoadShader(u"pip_yuv420.frag"_q);
 	const auto pipNv12Frag = LoadShader(u"pip_nv12.frag"_q);
@@ -283,11 +325,16 @@ void Pip::RendererRhi::createPipelines() {
 			4, QRhiShaderResourceBinding::FragmentStage,
 			_placeholderTexture, _sampler),
 	});
-	_yuv420Srb->create();
+	if (!_yuv420Srb->create()) {
+		return false;
+	}
 
 	_yuv420Pipeline = CreatePipeline(
 		_rhi, rpDesc, _yuv420Srb,
 		passthroughVert, pipYuv420Frag, false, 4 * sizeof(float));
+	if (!_yuv420Pipeline) {
+		return false;
+	}
 
 	_nv12Srb = _rhi->newShaderResourceBindings();
 	_nv12Srb->setBindings({
@@ -306,17 +353,26 @@ void Pip::RendererRhi::createPipelines() {
 			3, QRhiShaderResourceBinding::FragmentStage,
 			_placeholderTexture, _sampler),
 	});
-	_nv12Srb->create();
+	if (!_nv12Srb->create()) {
+		return false;
+	}
 
 	_nv12Pipeline = CreatePipeline(
 		_rhi, rpDesc, _nv12Srb,
 		passthroughVert, pipNv12Frag, false, 4 * sizeof(float));
+	if (!_nv12Pipeline) {
+		return false;
+	}
+	return true;
 }
 
 void Pip::RendererRhi::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!_initialized) {
+		return;
+	}
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -613,7 +669,9 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 					: _placeholderTexture,
 				_sampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 		paintTransformedContent(_nv12Pipeline, srb, geometry, slot);
 	} else {
 		const auto slot = allocateDrawSlot();
@@ -645,7 +703,9 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 					: _placeholderTexture,
 				_sampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 		paintTransformedContent(_yuv420Pipeline, srb, geometry, slot);
 	}
 }
@@ -701,7 +761,9 @@ void Pip::RendererRhi::paintTransformedStaticContent(
 				: _placeholderTexture,
 			_sampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_shadowImage.upload(_rhi, _rub);
 
@@ -919,7 +981,9 @@ void Pip::RendererRhi::paintButton(
 			_controlsImage.texture(),
 			_sampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_drawCommands.push_back({
 		.pipeline = _controlsPipeline,
@@ -1099,7 +1163,9 @@ void Pip::RendererRhi::paintUsingRaster(
 				image.texture(),
 				_sampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 
 		const auto pipeline = transparent
 			? _imageBlendPipeline

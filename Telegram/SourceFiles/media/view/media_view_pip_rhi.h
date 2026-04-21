@@ -35,6 +35,8 @@ public:
 	explicit RendererRhi(not_null<Pip*> owner);
 	~RendererRhi();
 
+	[[nodiscard]] static bool Available();
+
 	void initialize(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
@@ -99,7 +101,7 @@ private:
 	};
 
 	void createShadowTexture();
-	void createPipelines();
+	[[nodiscard]] bool createPipelines();
 	void validateControls();
 	void invalidateControls();
 

@@ -557,6 +557,23 @@ public:
 		releaseResources();
 	}
 
+	[[nodiscard]] static bool Available() {
+		static const auto result = [] {
+			auto ok = Ui::Rhi::ShaderFromFile(
+				u":/shaders/argb32.vert.qsb"_q).isValid()
+				&& Ui::Rhi::ShaderFromFile(
+					u":/shaders/incoming_shadow.frag.qsb"_q).isValid()
+				&& Ui::Rhi::ShaderFromFile(
+					u":/shaders/incoming_yuv420.frag.qsb"_q).isValid();
+#ifndef Q_OS_MAC
+			ok = ok && Ui::Rhi::ShaderFromFile(
+				u":/shaders/argb32.frag.qsb"_q).isValid();
+#endif
+			return ok;
+		}();
+		return result;
+	}
+
 	void initialize(
 			QRhi *rhi,
 			QRhiRenderTarget *rt,
@@ -564,6 +581,7 @@ public:
 		if (_initialized && _rhi == rhi) {
 			return;
 		}
+		releaseResources();
 		_rhi = rhi;
 		_vertexBuffer = rhi->newBuffer(
 			QRhiBuffer::Dynamic,
@@ -583,101 +601,11 @@ public:
 		_placeholder = rhi->newTexture(QRhiTexture::BGRA8, QSize(1, 1));
 		_placeholder->create();
 
-		const auto rpDesc = rt->renderPassDescriptor();
-		const auto vs = Ui::Rhi::ShaderFromFile(
-			u":/shaders/argb32.vert.qsb"_q);
-		const auto argb32Fs = Ui::Rhi::ShaderFromFile(
-			u":/shaders/incoming_shadow.frag.qsb"_q);
-		const auto yuv420Fs = Ui::Rhi::ShaderFromFile(
-			u":/shaders/incoming_yuv420.frag.qsb"_q);
-
-		QRhiVertexInputLayout layout;
-		layout.setBindings({ { 4 * sizeof(float) } });
-		layout.setAttributes({
-			{ 0, 0, QRhiVertexInputAttribute::Float2, 0 },
-			{ 0, 1, QRhiVertexInputAttribute::Float2, 2 * sizeof(float) },
-		});
-
-		_argb32Srb = rhi->newShaderResourceBindings();
-		_argb32Srb->setBindings({
-			QRhiShaderResourceBinding::uniformBuffer(
-				0,
-				QRhiShaderResourceBinding::VertexStage
-					| QRhiShaderResourceBinding::FragmentStage,
-				_uniformBuffer),
-			QRhiShaderResourceBinding::sampledTexture(
-				1, QRhiShaderResourceBinding::FragmentStage,
-				_placeholder, _sampler),
-		});
-		_argb32Srb->create();
-
-		_argb32Pipeline = rhi->newGraphicsPipeline();
-		_argb32Pipeline->setShaderStages({
-			{ QRhiShaderStage::Vertex, vs },
-			{ QRhiShaderStage::Fragment, argb32Fs },
-		});
-		_argb32Pipeline->setVertexInputLayout(layout);
-		_argb32Pipeline->setTopology(
-			QRhiGraphicsPipeline::TriangleStrip);
-		_argb32Pipeline->setShaderResourceBindings(_argb32Srb);
-		_argb32Pipeline->setRenderPassDescriptor(rpDesc);
-		_argb32Pipeline->create();
-
-		_yuv420Srb = rhi->newShaderResourceBindings();
-		_yuv420Srb->setBindings({
-			QRhiShaderResourceBinding::uniformBuffer(
-				0,
-				QRhiShaderResourceBinding::VertexStage
-					| QRhiShaderResourceBinding::FragmentStage,
-				_uniformBuffer),
-			QRhiShaderResourceBinding::sampledTexture(
-				1, QRhiShaderResourceBinding::FragmentStage,
-				_placeholder, _sampler),
-			QRhiShaderResourceBinding::sampledTexture(
-				2, QRhiShaderResourceBinding::FragmentStage,
-				_placeholder, _sampler),
-			QRhiShaderResourceBinding::sampledTexture(
-				3, QRhiShaderResourceBinding::FragmentStage,
-				_placeholder, _sampler),
-		});
-		_yuv420Srb->create();
-
-		_yuv420Pipeline = rhi->newGraphicsPipeline();
-		_yuv420Pipeline->setShaderStages({
-			{ QRhiShaderStage::Vertex, vs },
-			{ QRhiShaderStage::Fragment, yuv420Fs },
-		});
-		_yuv420Pipeline->setVertexInputLayout(layout);
-		_yuv420Pipeline->setTopology(
-			QRhiGraphicsPipeline::TriangleStrip);
-		_yuv420Pipeline->setShaderResourceBindings(_yuv420Srb);
-		_yuv420Pipeline->setRenderPassDescriptor(rpDesc);
-		_yuv420Pipeline->create();
-
-#ifndef Q_OS_MAC
-		const auto shadowFs = Ui::Rhi::ShaderFromFile(
-			u":/shaders/argb32.frag.qsb"_q);
-		QRhiGraphicsPipeline::TargetBlend blend;
-		blend.enable = true;
-		blend.srcColor = QRhiGraphicsPipeline::One;
-		blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
-		blend.srcAlpha = QRhiGraphicsPipeline::One;
-		blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
-		_shadowBlendPipeline = rhi->newGraphicsPipeline();
-		_shadowBlendPipeline->setShaderStages({
-			{ QRhiShaderStage::Vertex, vs },
-			{ QRhiShaderStage::Fragment, shadowFs },
-		});
-		_shadowBlendPipeline->setVertexInputLayout(layout);
-		_shadowBlendPipeline->setTargetBlends({ blend });
-		_shadowBlendPipeline->setTopology(
-			QRhiGraphicsPipeline::TriangleStrip);
-		_shadowBlendPipeline->setShaderResourceBindings(_argb32Srb);
-		_shadowBlendPipeline->setRenderPassDescriptor(rpDesc);
-		_shadowBlendPipeline->create();
-#endif
-
-		_initialized = true;
+		_initialized = createPipelines(rt);
+		if (!_initialized) {
+			releaseResources();
+			return;
+		}
 	}
 
 	void render(
@@ -688,6 +616,12 @@ public:
 		const auto markGuard = gsl::finally([&] {
 			_owner->_track->markFrameShown();
 		});
+		if (!_initialized) {
+			auto *rub = rhi->nextResourceUpdateBatch();
+			cb->beginPass(rt, Qt::black, { 1.0f, 0 }, rub);
+			cb->endPass();
+			return;
+		}
 		const auto data = _owner->_track->frameWithInfo(false);
 		if (data.format == Webrtc::FrameFormat::None) {
 			auto *rub = rhi->nextResourceUpdateBatch();
@@ -800,7 +734,9 @@ public:
 					_vTexture, _sampler),
 			});
 		}
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 
 		const auto pw = float(rt->pixelSize().width());
 		const auto ph = float(rt->pixelSize().height());
@@ -869,6 +805,127 @@ public:
 		cb->endPass();
 	}
 
+	[[nodiscard]] bool createPipelines(QRhiRenderTarget *rt) {
+		if (!Available()) {
+			return false;
+		}
+		const auto createPipeline = [](QRhiGraphicsPipeline *pipeline) {
+			if (!pipeline->create()) {
+				delete pipeline;
+				return static_cast<QRhiGraphicsPipeline*>(nullptr);
+			}
+			return pipeline;
+		};
+		const auto rpDesc = rt->renderPassDescriptor();
+		const auto vs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/argb32.vert.qsb"_q);
+		const auto argb32Fs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/incoming_shadow.frag.qsb"_q);
+		const auto yuv420Fs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/incoming_yuv420.frag.qsb"_q);
+
+		QRhiVertexInputLayout layout;
+		layout.setBindings({ { 4 * sizeof(float) } });
+		layout.setAttributes({
+			{ 0, 0, QRhiVertexInputAttribute::Float2, 0 },
+			{ 0, 1, QRhiVertexInputAttribute::Float2, 2 * sizeof(float) },
+		});
+
+		_argb32Srb = _rhi->newShaderResourceBindings();
+		_argb32Srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1, QRhiShaderResourceBinding::FragmentStage,
+				_placeholder, _sampler),
+		});
+		if (!_argb32Srb->create()) {
+			return false;
+		}
+
+		_argb32Pipeline = _rhi->newGraphicsPipeline();
+		_argb32Pipeline->setShaderStages({
+			{ QRhiShaderStage::Vertex, vs },
+			{ QRhiShaderStage::Fragment, argb32Fs },
+		});
+		_argb32Pipeline->setVertexInputLayout(layout);
+		_argb32Pipeline->setTopology(
+			QRhiGraphicsPipeline::TriangleStrip);
+		_argb32Pipeline->setShaderResourceBindings(_argb32Srb);
+		_argb32Pipeline->setRenderPassDescriptor(rpDesc);
+		_argb32Pipeline = createPipeline(_argb32Pipeline);
+		if (!_argb32Pipeline) {
+			return false;
+		}
+
+		_yuv420Srb = _rhi->newShaderResourceBindings();
+		_yuv420Srb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage
+					| QRhiShaderResourceBinding::FragmentStage,
+				_uniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1, QRhiShaderResourceBinding::FragmentStage,
+				_placeholder, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				2, QRhiShaderResourceBinding::FragmentStage,
+				_placeholder, _sampler),
+			QRhiShaderResourceBinding::sampledTexture(
+				3, QRhiShaderResourceBinding::FragmentStage,
+				_placeholder, _sampler),
+		});
+		if (!_yuv420Srb->create()) {
+			return false;
+		}
+
+		_yuv420Pipeline = _rhi->newGraphicsPipeline();
+		_yuv420Pipeline->setShaderStages({
+			{ QRhiShaderStage::Vertex, vs },
+			{ QRhiShaderStage::Fragment, yuv420Fs },
+		});
+		_yuv420Pipeline->setVertexInputLayout(layout);
+		_yuv420Pipeline->setTopology(
+			QRhiGraphicsPipeline::TriangleStrip);
+		_yuv420Pipeline->setShaderResourceBindings(_yuv420Srb);
+		_yuv420Pipeline->setRenderPassDescriptor(rpDesc);
+		_yuv420Pipeline = createPipeline(_yuv420Pipeline);
+		if (!_yuv420Pipeline) {
+			return false;
+		}
+
+#ifndef Q_OS_MAC
+		const auto shadowFs = Ui::Rhi::ShaderFromFile(
+			u":/shaders/argb32.frag.qsb"_q);
+		QRhiGraphicsPipeline::TargetBlend blend;
+		blend.enable = true;
+		blend.srcColor = QRhiGraphicsPipeline::One;
+		blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+		blend.srcAlpha = QRhiGraphicsPipeline::One;
+		blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+		_shadowBlendPipeline = _rhi->newGraphicsPipeline();
+		_shadowBlendPipeline->setShaderStages({
+			{ QRhiShaderStage::Vertex, vs },
+			{ QRhiShaderStage::Fragment, shadowFs },
+		});
+		_shadowBlendPipeline->setVertexInputLayout(layout);
+		_shadowBlendPipeline->setTargetBlends({ blend });
+		_shadowBlendPipeline->setTopology(
+			QRhiGraphicsPipeline::TriangleStrip);
+		_shadowBlendPipeline->setShaderResourceBindings(_argb32Srb);
+		_shadowBlendPipeline->setRenderPassDescriptor(rpDesc);
+		_shadowBlendPipeline = createPipeline(_shadowBlendPipeline);
+		if (!_shadowBlendPipeline) {
+			return false;
+		}
+#endif
+
+		return true;
+	}
+
 	void paintTitleShadow(
 			QRhiRenderTarget *rt,
 			QRhiCommandBuffer *cb,
@@ -935,7 +992,9 @@ public:
 				QRhiShaderResourceBinding::FragmentStage,
 				_shadowTexture, _sampler),
 		});
-		_argb32Srb->create();
+		if (!_argb32Srb->create()) {
+			return;
+		}
 
 		cb->resourceUpdate(rub2);
 		cb->setGraphicsPipeline(_shadowBlendPipeline);
@@ -1069,12 +1128,16 @@ void Panel::Incoming::setControlsAlignment(style::align align) {
 Ui::GL::ChosenRenderer Panel::Incoming::chooseRenderer(
 		Ui::GL::Backend backend) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (backend == Ui::GL::Backend::QRhi) {
+	if (backend == Ui::GL::Backend::QRhi
+		&& RendererRhi::Available()) {
 		_opengl = true;
 		return {
 			.renderer = std::make_unique<RendererRhi>(this),
 			.backend = Ui::GL::Backend::QRhi,
 		};
+	}
+	if (backend == Ui::GL::Backend::QRhi) {
+		backend = Ui::GL::Backend::OpenGL;
 	}
 #endif // Qt >= 6.7
 	_opengl = (backend == Ui::GL::Backend::OpenGL);

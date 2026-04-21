@@ -34,6 +34,14 @@ static_assert(sizeof(DemoUniforms) % 16 == 0);
 
 } // namespace
 
+bool GpuDemoRenderer::Available() {
+	static const auto result = [] {
+		return LoadShader(u"demo.vert"_q).isValid()
+			&& LoadShader(u"demo.frag"_q).isValid();
+	}();
+	return result;
+}
+
 GpuDemoRenderer::GpuDemoRenderer() {
 	_elapsed.start();
 }
@@ -52,6 +60,9 @@ void GpuDemoRenderer::initialize(
 	releaseResources();
 
 	_rhi = rhi;
+	if (!Available()) {
+		return;
+	}
 
 	constexpr auto kVertexSize = 4 * sizeof(float);
 	constexpr auto kQuadVertices = 4;
@@ -76,7 +87,10 @@ void GpuDemoRenderer::initialize(
 				| QRhiShaderResourceBinding::FragmentStage,
 			_uniformBuffer),
 	});
-	_srb->create();
+	if (!_srb->create()) {
+		releaseResources();
+		return;
+	}
 
 	const auto rpDesc = rt->renderPassDescriptor();
 	const auto vertShader = LoadShader(u"demo.vert"_q);
@@ -100,7 +114,10 @@ void GpuDemoRenderer::initialize(
 	_pipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_pipeline->setShaderResourceBindings(_srb);
 	_pipeline->setRenderPassDescriptor(rpDesc);
-	_pipeline->create();
+	if (!_pipeline->create()) {
+		releaseResources();
+		return;
+	}
 
 	_initialized = true;
 
@@ -113,6 +130,12 @@ void GpuDemoRenderer::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!_initialized) {
+		auto *rub = rhi->nextResourceUpdateBatch();
+		cb->beginPass(rt, rhiClearColor(), { 1.0f, 0 }, rub);
+		cb->endPass();
+		return;
+	}
 	_rhi = rhi;
 
 	const auto size = rt->pixelSize();
@@ -181,9 +204,12 @@ void GpuDemoRenderer::paintFallback(
 }
 
 Ui::GL::ChosenRenderer ChooseDemoRenderer() {
+	const auto backend = GpuDemoRenderer::Available()
+		? Ui::GL::Backend::QRhi
+		: Ui::GL::Backend::Raster;
 	return {
 		.renderer = std::make_unique<GpuDemoRenderer>(),
-		.backend = Ui::GL::Backend::QRhi,
+		.backend = backend,
 	};
 }
 

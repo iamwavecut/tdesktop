@@ -96,6 +96,16 @@ static_assert(sizeof(RenderUniforms) % 16 == 0);
 
 } // namespace
 
+bool ThanosEffectRenderer::Available() {
+	static const auto result = [] {
+		return LoadShader(u"thanos_init.comp"_q).isValid()
+			&& LoadShader(u"thanos_update.comp"_q).isValid()
+			&& LoadShader(u"thanos.vert"_q).isValid()
+			&& LoadShader(u"thanos.frag"_q).isValid();
+	}();
+	return result;
+}
+
 ThanosEffectRenderer::ThanosEffectRenderer() {
 	_elapsed.start();
 }
@@ -162,7 +172,16 @@ void ThanosEffectRenderer::initialize(
 		QRhiSampler::ClampToEdge);
 	_placeholderSampler->create();
 
-	createPipelines(rt);
+	if (!createPipelines(rt)) {
+		const auto hadItems = !_items.empty() || !_pendingItems.empty();
+		LOG(("ThanosEffect: Required shaders unavailable or pipeline creation failed, disabling QRhi path."));
+		releaseResources();
+		_pendingItems.clear();
+		if (hadItems) {
+			_allDone.fire({});
+		}
+		return;
+	}
 
 	auto *rub = rhi->nextResourceUpdateBatch();
 	rub->uploadStaticBuffer(_quadVertexBuffer, kQuadVertices);
@@ -176,50 +195,62 @@ void ThanosEffectRenderer::initialize(
 		.arg(rhi->driverInfo().deviceName));
 }
 
-void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
+bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
+	if (!Available()) {
+		return false;
+	}
+
 	const auto initShader = LoadShader(u"thanos_init.comp"_q);
 	const auto updateShader = LoadShader(u"thanos_update.comp"_q);
 	const auto vertShader = LoadShader(u"thanos.vert"_q);
 	const auto fragShader = LoadShader(u"thanos.frag"_q);
 
 	_computeInitSrbLayout = _rhi->newShaderResourceBindings();
-	_computeInitSrbLayout->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
-			0,
-			QRhiShaderResourceBinding::ComputeStage,
-			_placeholderParticleBuffer),
-		QRhiShaderResourceBinding::uniformBuffer(
-			1,
-			QRhiShaderResourceBinding::ComputeStage,
-			_computeInitUniformBuffer),
-	});
-	_computeInitSrbLayout->create();
+		_computeInitSrbLayout->setBindings({
+			QRhiShaderResourceBinding::bufferLoadStore(
+				0,
+				QRhiShaderResourceBinding::ComputeStage,
+				_placeholderParticleBuffer),
+			QRhiShaderResourceBinding::uniformBuffer(
+				1,
+				QRhiShaderResourceBinding::ComputeStage,
+				_computeInitUniformBuffer),
+		});
+	if (!_computeInitSrbLayout->create()) {
+		return false;
+	}
 
 	_computeInitPipeline = _rhi->newComputePipeline();
 	_computeInitPipeline->setShaderStage(
 		{ QRhiShaderStage::Compute, initShader });
 	_computeInitPipeline->setShaderResourceBindings(_computeInitSrbLayout);
-	_computeInitPipeline->create();
+	if (!_computeInitPipeline->create()) {
+		return false;
+	}
 
 	_computeUpdateSrbLayout = _rhi->newShaderResourceBindings();
-	_computeUpdateSrbLayout->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
-			0,
-			QRhiShaderResourceBinding::ComputeStage,
-			_placeholderParticleBuffer),
-		QRhiShaderResourceBinding::uniformBuffer(
-			1,
-			QRhiShaderResourceBinding::ComputeStage,
-			_computeUpdateUniformBuffer),
-	});
-	_computeUpdateSrbLayout->create();
+		_computeUpdateSrbLayout->setBindings({
+			QRhiShaderResourceBinding::bufferLoadStore(
+				0,
+				QRhiShaderResourceBinding::ComputeStage,
+				_placeholderParticleBuffer),
+			QRhiShaderResourceBinding::uniformBuffer(
+				1,
+				QRhiShaderResourceBinding::ComputeStage,
+				_computeUpdateUniformBuffer),
+		});
+	if (!_computeUpdateSrbLayout->create()) {
+		return false;
+	}
 
 	_computeUpdatePipeline = _rhi->newComputePipeline();
 	_computeUpdatePipeline->setShaderStage(
 		{ QRhiShaderStage::Compute, updateShader });
 	_computeUpdatePipeline->setShaderResourceBindings(
 		_computeUpdateSrbLayout);
-	_computeUpdatePipeline->create();
+	if (!_computeUpdatePipeline->create()) {
+		return false;
+	}
 
 	_renderSrbLayout = _rhi->newShaderResourceBindings();
 	_renderSrbLayout->setBindings({
@@ -233,7 +264,9 @@ void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 			_placeholderTexture,
 			_placeholderSampler),
 	});
-	_renderSrbLayout->create();
+	if (!_renderSrbLayout->create()) {
+		return false;
+	}
 
 	_renderPipeline = _rhi->newGraphicsPipeline();
 	_renderPipeline->setShaderStages({
@@ -266,7 +299,7 @@ void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	_renderPipeline->setShaderResourceBindings(_renderSrbLayout);
 	_renderPipeline->setRenderPassDescriptor(
 		rt->renderPassDescriptor());
-	_renderPipeline->create();
+	return _renderPipeline->create();
 }
 
 void ThanosEffectRenderer::render(
@@ -544,7 +577,10 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			QRhiShaderResourceBinding::ComputeStage,
 			initUbo),
 	});
-	result.computeInitSrb->create();
+	if (!result.computeInitSrb->create()) {
+		destroyAnimatingItem(result);
+		return result;
+	}
 
 	result.computeUpdateSrb = _rhi->newShaderResourceBindings();
 	result.computeUpdateSrb->setBindings({
@@ -557,7 +593,10 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			QRhiShaderResourceBinding::ComputeStage,
 			updateUbo),
 	});
-	result.computeUpdateSrb->create();
+	if (!result.computeUpdateSrb->create()) {
+		destroyAnimatingItem(result);
+		return result;
+	}
 
 	auto *renderUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
@@ -578,7 +617,10 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			tex,
 			sampler),
 	});
-	result.renderSrb->create();
+	if (!result.renderSrb->create()) {
+		destroyAnimatingItem(result);
+		return result;
+	}
 
 	return result;
 }

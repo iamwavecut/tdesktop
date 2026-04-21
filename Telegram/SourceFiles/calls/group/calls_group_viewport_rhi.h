@@ -40,6 +40,8 @@ public:
 	explicit RendererRhi(not_null<Viewport*> owner);
 	~RendererRhi();
 
+	[[nodiscard]] static bool Available();
+
 	void initialize(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
@@ -110,7 +112,7 @@ private:
 		QSize size;
 	};
 
-	void createPipelines();
+	[[nodiscard]] bool createPipelines();
 	void ensureNoiseTexture();
 	void validateDatas();
 	void validateOutlineAnimation(

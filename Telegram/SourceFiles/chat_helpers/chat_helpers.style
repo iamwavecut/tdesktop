@@ -1153,6 +1153,20 @@ dialogsToUp: TwoIconButton(historyToDown) {
 	iconAboveOver: dialogsToUpAboveOver;
 }
 
+historySummarizeDownAbove: icon {
+	{ "history_down_arrow", historyToDownFg },
+	{ "chat/summary_stars-52x52", historyToDownFg },
+};
+historySummarizeDownAboveOver: icon {
+	{ "history_down_arrow", historyToDownFgOver },
+	{ "chat/summary_stars-52x52", historyToDownFgOver },
+};
+
+historySummarizeDown: TwoIconButton(historyToDown) {
+	iconAbove: historySummarizeDownAbove;
+	iconAboveOver: historySummarizeDownAboveOver;
+}
+
 historyUnreadMentions: TwoIconButton(historyToDown) {
 	iconAbove: icon {{ "history_unread_mention", historyToDownFg }};
 	iconAboveOver: icon {{ "history_unread_mention", historyToDownFgOver }};

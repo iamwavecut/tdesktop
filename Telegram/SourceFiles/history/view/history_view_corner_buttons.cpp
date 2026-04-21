@@ -63,6 +63,9 @@ CornerButtons::CornerButtons(
 , _down(
 	parent,
 	st->value(_stLifetime, st::historyToDown))
+, _summarizeDown(
+	parent,
+	st->value(_stLifetime, st::historySummarizeDown))
 , _mentions(
 	parent,
 	st->value(_stLifetime, st::historyUnreadMentions))
@@ -73,6 +76,7 @@ CornerButtons::CornerButtons(
 		parent,
 		st->value(_stLifetime, st::historyUnreadPollVotes)) {
 	_down.widget->addClickHandler([=] { downClick(); });
+	_summarizeDown.widget->addClickHandler([=] { downClick(); });
 	_mentions.widget->addClickHandler([=] { mentionsClick(); });
 	_reactions.widget->addClickHandler([=] { reactionsClick(); });
 	_pollVotes.widget->addClickHandler([=] { pollVotesClick(); });
@@ -81,6 +85,7 @@ CornerButtons::CornerButtons(
 		button.widget->installEventFilter(this);
 	};
 	filterScroll(_down);
+	filterScroll(_summarizeDown);
 	filterScroll(_mentions);
 	filterScroll(_reactions);
 	filterScroll(_pollVotes);
@@ -99,6 +104,7 @@ CornerButtons::CornerButtons(
 bool CornerButtons::eventFilter(QObject *o, QEvent *e) {
 	if (e->type() == QEvent::Wheel
 		&& (o == _down.widget
+			|| o == _summarizeDown.widget
 			|| o == _mentions.widget
 			|| o == _reactions.widget
 			|| o == _pollVotes.widget)) {
@@ -224,6 +230,7 @@ void CornerButtons::pushReplyReturn(not_null<HistoryItem*> item) {
 CornerButton &CornerButtons::buttonByType(Type type) {
 	switch (type) {
 	case Type::Down: return _down;
+	case Type::SummarizeDown: return _summarizeDown;
 	case Type::Mentions: return _mentions;
 	case Type::Reactions: return _reactions;
 	case Type::PollVotes: return _pollVotes;
@@ -313,12 +320,19 @@ void CornerButtons::updateUnreadThingsVisibility() {
 }
 
 void CornerButtons::updateJumpDownVisibility(std::optional<int> counter) {
-	if (const auto shown = _delegate->cornerButtonsDownShown()) {
+	const auto shown = _delegate->cornerButtonsDownShown();
+	if (shown) {
 		updateVisibility(Type::Down, *shown);
 	}
 	if (counter) {
-		_down.widget->setUnreadCount(*counter);
+		_unreadCount = *counter;
+		_down.widget->setUnreadCount(_unreadCount);
 	}
+	updateVisibility(
+		Type::SummarizeDown,
+		_delegate->cornerButtonsHas(Type::SummarizeDown)
+			&& _unreadCount > 0
+			&& (shown ? *shown : _down.shown));
 }
 
 void CornerButtons::updatePositions() {
@@ -336,6 +350,7 @@ void CornerButtons::updatePositions() {
 	// All corner buttons is a child widgets of _scroll, not me.
 
 	const auto historyDownShown = shown(_down);
+	const auto historySummarizeDownShown = shown(_summarizeDown);
 	const auto unreadMentionsShown = shown(_mentions);
 	const auto unreadReactionsShown = shown(_reactions);
 	const auto unreadPollVotesShown = shown(_pollVotes);
@@ -347,6 +362,17 @@ void CornerButtons::updatePositions() {
 			historyDownShown);
 		_down.widget->moveToRight(
 			st::historyToDownPosition.x(),
+			_parent->height() - top);
+	}
+	{
+		const auto top = anim::interpolate(
+			0,
+			_summarizeDown.widget->height() + st::historyToDownPosition.y(),
+			historySummarizeDownShown);
+		_summarizeDown.widget->moveToRight(
+			st::historyToDownPosition.x()
+				+ _down.widget->width()
+				+ skip,
 			_parent->height() - top);
 	}
 	{
@@ -408,6 +434,7 @@ void CornerButtons::updatePositions() {
 	}
 
 	checkVisibility(_down);
+	checkVisibility(_summarizeDown);
 	checkVisibility(_mentions);
 	checkVisibility(_reactions);
 	checkVisibility(_pollVotes);
@@ -415,6 +442,7 @@ void CornerButtons::updatePositions() {
 
 void CornerButtons::finishAnimations() {
 	_down.animation.stop();
+	_summarizeDown.animation.stop();
 	_mentions.animation.stop();
 	_reactions.animation.stop();
 	_pollVotes.animation.stop();

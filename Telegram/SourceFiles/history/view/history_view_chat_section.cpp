@@ -2289,7 +2289,8 @@ bool ChatWidget::cornerButtonsUnreadMayBeShown() {
 bool ChatWidget::cornerButtonsHas(CornerButtonType type) {
 	return _topic
 		|| (_sublist && type == CornerButtonType::Reactions)
-		|| (type == CornerButtonType::Down);
+		|| (type == CornerButtonType::Down)
+		|| (type == CornerButtonType::SummarizeDown);
 }
 
 void ChatWidget::showAtStart() {

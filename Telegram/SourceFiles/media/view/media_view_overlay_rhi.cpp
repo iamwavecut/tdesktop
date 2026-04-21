@@ -203,6 +203,13 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 		return false;
 	}
 	const auto rpDesc = _rt->renderPassDescriptor();
+	const auto createPipeline = [](QRhiGraphicsPipeline *pipeline) {
+		if (!pipeline->create()) {
+			delete pipeline;
+			return static_cast<QRhiGraphicsPipeline*>(nullptr);
+		}
+		return pipeline;
+	};
 
 	const auto argb32Vert = LoadShader(u"argb32.vert"_q);
 	const auto argb32Frag = LoadShader(u"argb32.frag"_q);
@@ -223,7 +230,9 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_imageSrb->create();
+	if (!_imageSrb->create()) {
+		return false;
+	}
 
 	auto *imagePipeline = _rhi->newGraphicsPipeline();
 	imagePipeline->setShaderStages({
@@ -240,7 +249,10 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 	imagePipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	imagePipeline->setShaderResourceBindings(_imageSrb);
 	imagePipeline->setRenderPassDescriptor(rpDesc);
-	imagePipeline->create();
+	imagePipeline = createPipeline(imagePipeline);
+	if (!imagePipeline) {
+		return false;
+	}
 	_imagePipeline = imagePipeline;
 
 	auto *imageBlendPipeline = _rhi->newGraphicsPipeline();
@@ -259,7 +271,10 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 	imageBlendPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	imageBlendPipeline->setShaderResourceBindings(_imageSrb);
 	imageBlendPipeline->setRenderPassDescriptor(rpDesc);
-	imageBlendPipeline->create();
+	imageBlendPipeline = createPipeline(imageBlendPipeline);
+	if (!imageBlendPipeline) {
+		return false;
+	}
 	_imageBlendPipeline = imageBlendPipeline;
 
 	const auto staticContentFrag = LoadShader(u"static_content.frag"_q);
@@ -286,7 +301,9 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_contentSrb->create();
+	if (!_contentSrb->create()) {
+		return false;
+	}
 
 	auto *staticPipeline = _rhi->newGraphicsPipeline();
 	staticPipeline->setShaderStages({
@@ -297,7 +314,10 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 	staticPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	staticPipeline->setShaderResourceBindings(_contentSrb);
 	staticPipeline->setRenderPassDescriptor(rpDesc);
-	staticPipeline->create();
+	staticPipeline = createPipeline(staticPipeline);
+	if (!staticPipeline) {
+		return false;
+	}
 	_staticContentPipeline = staticPipeline;
 
 	auto *staticBlendPipeline = _rhi->newGraphicsPipeline();
@@ -310,7 +330,10 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 	staticBlendPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	staticBlendPipeline->setShaderResourceBindings(_contentSrb);
 	staticBlendPipeline->setRenderPassDescriptor(rpDesc);
-	staticBlendPipeline->create();
+	staticBlendPipeline = createPipeline(staticBlendPipeline);
+	if (!staticBlendPipeline) {
+		return false;
+	}
 	_staticContentBlendPipeline = staticBlendPipeline;
 
 	_transparentContentSrb = _rhi->newShaderResourceBindings();
@@ -333,7 +356,9 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_transparentContentSrb->create();
+	if (!_transparentContentSrb->create()) {
+		return false;
+	}
 
 	auto *transparentPipeline = _rhi->newGraphicsPipeline();
 	transparentPipeline->setShaderStages({
@@ -345,7 +370,10 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 	transparentPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	transparentPipeline->setShaderResourceBindings(_transparentContentSrb);
 	transparentPipeline->setRenderPassDescriptor(rpDesc);
-	transparentPipeline->create();
+	transparentPipeline = createPipeline(transparentPipeline);
+	if (!transparentPipeline) {
+		return false;
+	}
 	_transparentContentPipeline = transparentPipeline;
 
 	const auto fillVert = LoadShader(u"fill.vert"_q);
@@ -361,7 +389,9 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 			0,
 			sizeof(RoundedCornersUniforms)),
 	});
-	_roundedCornersSrb->create();
+	if (!_roundedCornersSrb->create()) {
+		return false;
+	}
 
 	QRhiVertexInputLayout fillInputLayout;
 	fillInputLayout.setBindings({ { 2 * sizeof(float) } });
@@ -386,7 +416,10 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 	roundedPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	roundedPipeline->setShaderResourceBindings(_roundedCornersSrb);
 	roundedPipeline->setRenderPassDescriptor(rpDesc);
-	roundedPipeline->create();
+	roundedPipeline = createPipeline(roundedPipeline);
+	if (!roundedPipeline) {
+		return false;
+	}
 	_roundedCornersPipeline = roundedPipeline;
 
 	const auto yuv420Frag = LoadShader(u"yuv420_content.frag"_q);
@@ -422,7 +455,9 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_yuv420Srb->create();
+	if (!_yuv420Srb->create()) {
+		return false;
+	}
 
 	auto createYuvPipeline = [&](const QShader &frag, bool blending,
 			QRhiShaderResourceBindings *srb) {
@@ -438,12 +473,14 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 		pipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 		pipeline->setShaderResourceBindings(srb);
 		pipeline->setRenderPassDescriptor(rpDesc);
-		pipeline->create();
-		return pipeline;
+		return createPipeline(pipeline);
 	};
 
 	_yuv420Pipeline = createYuvPipeline(yuv420Frag, false, _yuv420Srb);
 	_yuv420BlendPipeline = createYuvPipeline(yuv420Frag, true, _yuv420Srb);
+	if (!_yuv420Pipeline || !_yuv420BlendPipeline) {
+		return false;
+	}
 
 	_nv12Srb = _rhi->newShaderResourceBindings();
 	_nv12Srb->setBindings({
@@ -470,11 +507,13 @@ bool OverlayWidget::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_sampler),
 	});
-	_nv12Srb->create();
+	if (!_nv12Srb->create()) {
+		return false;
+	}
 
 	_nv12Pipeline = createYuvPipeline(nv12Frag, false, _nv12Srb);
 	_nv12BlendPipeline = createYuvPipeline(nv12Frag, true, _nv12Srb);
-	return true;
+	return _nv12Pipeline && _nv12BlendPipeline;
 }
 
 void OverlayWidget::RendererRhi::render(
@@ -753,7 +792,9 @@ void OverlayWidget::RendererRhi::drawTexturedQuad(
 			texture,
 			_sampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_drawCommands.push_back({
 		.pipeline = blend ? _imageBlendPipeline : pipeline,
@@ -1000,7 +1041,9 @@ void OverlayWidget::RendererRhi::drawContentQuad(
 				: _placeholderTexture,
 			_sampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	_drawCommands.push_back({
 		.pipeline = pipeline,
@@ -1305,7 +1348,9 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 				_sampler),
 		});
 	}
-	srb->create();
+	if (!srb->create()) {
+		return;
+	}
 
 	auto *pipeline = nv12
 		? (blendEnabled ? _nv12BlendPipeline : _nv12Pipeline)
@@ -1771,7 +1816,9 @@ void OverlayWidget::RendererRhi::paintRoundedCorners(int radius) {
 				uOffset,
 				sizeof(RoundedCornersUniforms)),
 		});
-		srb->create();
+		if (!srb->create()) {
+			return;
+		}
 
 		_drawCommands.push_back({
 			.pipeline = _roundedCornersPipeline,

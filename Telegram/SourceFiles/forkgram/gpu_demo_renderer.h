@@ -34,6 +34,8 @@ public:
 	GpuDemoRenderer();
 	~GpuDemoRenderer();
 
+	[[nodiscard]] static bool Available();
+
 	void initialize(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
