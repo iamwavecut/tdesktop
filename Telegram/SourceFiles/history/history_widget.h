@@ -381,6 +381,8 @@ private:
 	std::optional<bool> cornerButtonsDownShown() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(HistoryView::CornerButtonType type) override;
+	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownLoading() override;
 
 	[[nodiscard]] bool checkSendPayment(
 		int messagesCount,
@@ -388,6 +390,7 @@ private:
 		Fn<void(int)> withPaymentApproved);
 
 	void checkSuggestToGigagroup();
+	void syncUnreadSummaryState(bool allowAutoScroll);
 	void processReply();
 	void setReplyFieldsFromProcessing();
 
@@ -824,6 +827,10 @@ private:
 	Ui::Animations::Simple _scrollToAnimation;
 
 	HistoryView::CornerButtons _cornerButtons;
+	PeerId _unreadSummaryPeerId = 0;
+	MsgId _unreadSummaryTopicRootId = 0;
+	PeerId _unreadSummaryMonoforumPeerId = 0;
+	int _unreadSummaryVersion = 0;
 
 	std::unique_ptr<ChatHelpers::FieldAutocomplete> _autocomplete;
 	std::unique_ptr<Ui::Emoji::SuggestionsController> _emojiSuggestions;

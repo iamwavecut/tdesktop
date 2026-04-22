@@ -208,6 +208,8 @@ PRIVATE
     api/api_toggling_media.h
     api/api_transcribes.cpp
     api/api_transcribes.h
+    api/api_unread_summaries.cpp
+    api/api_unread_summaries.h
     api/api_unread_things.cpp
     api/api_unread_things.h
     api/api_updates.cpp

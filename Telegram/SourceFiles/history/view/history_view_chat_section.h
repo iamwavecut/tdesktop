@@ -219,10 +219,13 @@ public:
 	std::optional<bool> cornerButtonsDownShown() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
+	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownLoading() override;
 
 private:
 	void resizeEvent(QResizeEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
+	void syncUnreadSummaryState(bool allowAutoScroll);
 
 	void showAnimatedHook(
 		const Window::SectionSlideParams &params) override;
@@ -446,6 +449,10 @@ private:
 
 	FullMsgId _lastShownAt;
 	HistoryView::CornerButtons _cornerButtons;
+	PeerId _unreadSummaryPeerId = 0;
+	MsgId _unreadSummaryTopicRootId = 0;
+	PeerId _unreadSummaryMonoforumPeerId = 0;
+	int _unreadSummaryVersion = 0;
 	rpl::lifetime _topicLifetime;
 
 	Ui::Controls::SwipeContextData _gestureHorizontal;

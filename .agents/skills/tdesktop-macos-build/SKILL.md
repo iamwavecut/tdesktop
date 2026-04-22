@@ -9,11 +9,22 @@ Use this skill for this repository only.
 
 It captures the packaged macOS path that was proven locally on:
 
-- macOS 26.4.x
-- Xcode 26.4.x
-- CMake 4.3.x
+- macOS 26.4.1
+- Xcode 26.4.1
+- CMake 4.3.1
 - Homebrew Qt 6.11.0
+- Homebrew `qtsvg` 6.11.0
 - Homebrew `qtimageformats` 6.11.0
+- Homebrew `openssl@3` 3.6.2
+- Homebrew `ffmpeg` 8.1_1
+- Homebrew `opus` 1.6.1
+- Homebrew `libvpx` 1.16.0
+- Homebrew `minizip` 1.3.2_1
+- Homebrew `openal-soft` 1.25.1
+- Homebrew `openh264` 2.6.0
+- Homebrew `boost` 1.90.0_1
+- Homebrew `abseil` 20260107.1
+- Homebrew `ada-url` 3.4.4
 
 The successful result was:
 
@@ -21,6 +32,10 @@ The successful result was:
 - build with `cmake --build out --config Debug --target Forkgram`
 - output app at `out/Debug/Forkgram.app`
 - build with `cmake --build out --config Release --target Forkgram`
+- package a portable ad-hoc-signed app at `out/Release/Forkgram.app`
+- verify `codesign --verify --deep --strict --verbose=2 out/Release/Forkgram.app`
+- verify there are no leftover absolute references to `/opt/homebrew` or `out/macos-local/prefix`
+- install the packaged release app into `/Applications/Forkgram.app` once the running app is closed
 - package a standalone unsigned DMG at `out/Release/Forkgram-macos-arm64.dmg`
 
 ## Quick rules
@@ -30,6 +45,7 @@ The successful result was:
 - Do not use `force` with `Telegram/configure.sh` once `out/macos-local` exists. `force` clears most of `out/` and will wipe the local dependency prefix.
 - Use `-DTDESKTOP_API_TEST=ON` for a local non-deployment build unless the user provides real API credentials.
 - On Xcode 26 SDKs, use `-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0` for app configure and for locally built dependencies. This is the key workaround for the obsolete desktop-capture APIs in `tg_owt`.
+- If `/Applications/Forkgram.app` is running, do not replace the bundle in place. Close the app first, then copy the packaged release bundle into `/Applications`.
 
 ## Homebrew deps
 
@@ -404,6 +420,24 @@ done
 Expected result:
 
 - no output
+
+### 3a. Install the packaged app into `/Applications`
+
+Do this only if user asks you to, after the packaged `out/Release/Forkgram.app` passes the verification steps above.
+
+If `/Applications/Forkgram.app` is running, close it first. Then replace the installed bundle from the repository root:
+
+```bash
+rm -rf /Applications/Forkgram.app
+ditto out/Release/Forkgram.app /Applications/Forkgram.app
+codesign --verify --deep --strict --verbose=2 /Applications/Forkgram.app
+```
+
+Expected result:
+
+- `/Applications/Forkgram.app` exists
+- the installed bundle passes `codesign --verify`
+- the next launch uses the freshly packaged `Release` build
 
 If that scan still prints only `out/Release/Forkgram.app/Contents/MacOS/Forkgram`, rewrite each leftover `/opt/homebrew/...` dependency to the matching `@executable_path/../Frameworks/...` path, then re-sign again. This happened locally after a fresh `Release` relink.
 

@@ -183,6 +183,8 @@ private:
 	std::optional<bool> cornerButtonsDownShown() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
+	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownLoading() override;
 
 	const not_null<QAction*> _dummyAction;
 	const not_null<Main::Session*> _session;
@@ -949,6 +951,13 @@ bool Item::cornerButtonsUnreadMayBeShown() {
 
 bool Item::cornerButtonsHas(CornerButtonType type) {
 	return (type == CornerButtonType::Down);
+}
+
+void Item::cornerButtonsSummarizeDown() {
+}
+
+bool Item::cornerButtonsSummarizeDownLoading() {
+	return false;
 }
 
 } // namespace

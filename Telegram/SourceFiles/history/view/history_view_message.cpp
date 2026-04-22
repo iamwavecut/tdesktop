@@ -72,6 +72,7 @@ constexpr auto kFullLineAppearFinalDuration = crl::time(120);
 constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 constexpr auto kMinWidthAppearDuration = crl::time(160);
+constexpr auto kUnreadSummaryBubbleOpacity = 0.7;
 
 void ApplyRevealGradient(
 		not_null<const TextAppearing*> appearing,
@@ -1240,6 +1241,10 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 			&& (_fromNameVersion < item->displayFrom()->nameVersion())) {
 			fromNameUpdated(g.width());
 		}
+		const auto wasOpacity = p.opacity();
+		if (item->isUnreadSummary()) {
+			p.setOpacity(wasOpacity * kUnreadSummaryBubbleOpacity);
+		}
 		Ui::PaintBubble(
 			p,
 			Ui::ComplexBubble{
@@ -1255,6 +1260,9 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 				},
 				.selection = mediaSelectionIntervals,
 			});
+		if (item->isUnreadSummary()) {
+			p.setOpacity(wasOpacity);
+		}
 
 		auto inner = g;
 		paintCommentsButton(p, inner, context);
@@ -2898,6 +2906,8 @@ void Message::unloadHeavyPart() {
 bool Message::hasFromPhoto() const {
 	if (isHidden()) {
 		return false;
+	} else if (data()->isUnreadSummary()) {
+		return false;
 	}
 	switch (context()) {
 	case Context::AdminLog:
@@ -4314,6 +4324,9 @@ bool Message::allowTextSelectionByHandler(
 }
 
 bool Message::hasFromName() const {
+	if (data()->isUnreadSummary()) {
+		return false;
+	}
 	switch (context()) {
 	case Context::AdminLog:
 		return true;

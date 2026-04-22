@@ -7896,6 +7896,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_summarize_header_title" = "AI summary";
 "lng_summarize_header_about" = "Click to see original text";
+"lng_fork_unread_summary_title" = "Unread summary";
+"lng_fork_unread_summary_title_range" = "Unread summary: {from} - {to}";
 
 "lng_calendar" = "Calendar";
 

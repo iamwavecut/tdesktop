@@ -349,6 +349,9 @@ public:
 	[[nodiscard]] bool textAppearingStarted() const {
 		return _flags & MessageFlag::TextAppearingStarted;
 	}
+	[[nodiscard]] bool isUnreadSummary() const {
+		return _flags & MessageFlag::UnreadSummary;
+	}
 	[[nodiscard]] bool hasRealFromId() const;
 	[[nodiscard]] bool isPostHidingAuthor() const;
 	[[nodiscard]] bool isPostShowingAuthor() const;

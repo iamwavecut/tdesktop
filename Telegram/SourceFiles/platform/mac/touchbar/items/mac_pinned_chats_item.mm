@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "base/call_delayed.h"
+#include "base/platform/mac/base_utilities_mac.h"
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -804,27 +805,31 @@ NSRect PeerRectByIndex(int index) {
 	}
 	CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
 	{
-		CGImageRef image = ([self imageToDraw:i]).toCGImage();
-		CGContextDrawImage(context, rect, image);
-		CGImageRelease(image);
+		CGImageRef image = Platform::Q2CGImage([self imageToDraw:i]);
+		if (image) {
+			CGContextDrawImage(context, rect, image);
+			CGImageRelease(image);
+		}
 	}
 
 	if (i >= 0) {
 		const auto &pin = _pins[i];
 		const auto rectRight = NSMaxX(rect);
 		if (!pin->unreadBadge.isNull()) {
-			CGImageRef image = pin->unreadBadge.toCGImage();
-			const auto w = CGImageGetWidth(image)
-				/ float64(style::DevicePixelRatio());
-			const auto borderRect = CGRectMake(
-				rectRight - w,
-				0,
-				w,
-				CGImageGetHeight(image)
-					/ float64(style::DevicePixelRatio()));
-			CGContextDrawImage(context, borderRect, image);
-			CGImageRelease(image);
-			return;
+			CGImageRef image = Platform::Q2CGImage(pin->unreadBadge);
+			if (image) {
+				const auto w = CGImageGetWidth(image)
+					/ float64(style::DevicePixelRatio());
+				const auto borderRect = CGRectMake(
+					rectRight - w,
+					0,
+					w,
+					CGImageGetHeight(image)
+						/ float64(style::DevicePixelRatio()));
+				CGContextDrawImage(context, borderRect, image);
+				CGImageRelease(image);
+				return;
+			}
 		}
 		const auto now = base::unixtime::now();
 		const auto online = pin->lastseen.isOnline(now);

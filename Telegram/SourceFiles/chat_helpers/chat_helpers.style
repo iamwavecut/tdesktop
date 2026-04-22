@@ -1161,6 +1161,14 @@ historySummarizeDownAboveOver: icon {
 	{ "history_down_arrow", historyToDownFgOver },
 	{ "chat/summary_stars-52x52", historyToDownFgOver },
 };
+historySummarizeDownLoadingAbove: icon {
+	{ "menu/hourglass", historyToDownFg, point(14px, 14px) },
+	{ "chat/summary_stars-52x52", historyToDownFg },
+};
+historySummarizeDownLoadingAboveOver: icon {
+	{ "menu/hourglass", historyToDownFgOver, point(14px, 14px) },
+	{ "chat/summary_stars-52x52", historyToDownFgOver },
+};
 
 historySummarizeDown: TwoIconButton(historyToDown) {
 	iconAbove: historySummarizeDownAbove;

@@ -61,10 +61,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/fields/password_input.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
+
+#include <QtCore/QUrl>
 
 namespace Settings {
 
@@ -243,6 +246,176 @@ bool StickerSizeBox::isInvalidUrl(QString linkUrl) {
 	return !number || number < 50 || number > 256;
 }
 
+class TextValueBox final : public Ui::BoxContent, public base::has_weak_ptr {
+public:
+	TextValueBox(
+		QWidget*,
+		QString title,
+		QString placeholder,
+		Fn<QString()> current,
+		Fn<void(QString)> save,
+		Fn<bool(QString)> invalid,
+		bool masked = false);
+
+	void setInnerFocus() override;
+
+protected:
+	void prepare() override;
+
+private:
+	const QString _title;
+	const QString _placeholder;
+	const Fn<QString()> _current;
+	const Fn<void(QString)> _save;
+	const Fn<bool(QString)> _invalid;
+	const bool _masked = false;
+	Fn<void()> _setInnerFocus;
+};
+
+TextValueBox::TextValueBox(
+	QWidget*,
+	QString title,
+	QString placeholder,
+	Fn<QString()> current,
+	Fn<void(QString)> save,
+	Fn<bool(QString)> invalid,
+	bool masked)
+: _title(std::move(title))
+, _placeholder(std::move(placeholder))
+, _current(std::move(current))
+, _save(std::move(save))
+, _invalid(std::move(invalid))
+, _masked(masked) {
+}
+
+void TextValueBox::setInnerFocus() {
+	Expects(_setInnerFocus != nullptr);
+
+	_setInnerFocus();
+}
+
+void TextValueBox::prepare() {
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+
+	Fn<QString()> readText;
+	Fn<void()> showError;
+	Fn<void(Fn<void()>)> bindSubmit;
+	if (_masked) {
+		auto wrap = object_ptr<Ui::RpWidget>(content);
+		const auto raw = wrap.data();
+		const auto password = Ui::CreateChild<Ui::PasswordInput>(
+			raw,
+			st::defaultInputField,
+			rpl::single(_placeholder),
+			_current());
+		raw->resize(raw->width(), password->height());
+		raw->geometryValue(
+		) | rpl::on_next([=](const QRect &geometry) {
+			password->resize(geometry.width(), password->height());
+			password->moveToLeft(0, 0);
+			raw->resize(geometry.width(), password->height());
+		}, raw->lifetime());
+		content->add(std::move(wrap), st::markdownLinkFieldPadding);
+		readText = [=]() -> QString {
+			return password->getLastText();
+		};
+		showError = [=] {
+			password->showError();
+		};
+		bindSubmit = [=](Fn<void()> submit) {
+			QObject::connect(
+				password,
+				&Ui::MaskedInputField::submitted,
+				[=](Qt::KeyboardModifiers) {
+					submit();
+				});
+		};
+		_setInnerFocus = [=] {
+			password->setFocusFast();
+		};
+	} else {
+		const auto input = content->add(
+			object_ptr<Ui::InputField>(
+				content,
+				st::defaultInputField,
+				rpl::single(_placeholder),
+				_current()),
+			st::markdownLinkFieldPadding);
+		readText = [=]() -> QString {
+			return input->getLastText();
+		};
+		showError = [=] {
+			input->showError();
+		};
+		bindSubmit = [=](Fn<void()> submit) {
+			input->submits(
+			) | rpl::on_next([=](Qt::KeyboardModifiers) {
+				submit();
+			}, input->lifetime());
+		};
+		_setInnerFocus = [=] {
+			input->setFocusFast();
+		};
+	}
+
+	const auto submit = [=] {
+		const auto value = readText().trimmed();
+		if (_invalid(value)) {
+			showError();
+			return;
+		}
+		const auto weak = base::make_weak(this);
+		_save(value);
+		Core::App().saveSettings();
+		if (weak) {
+			closeBox();
+		}
+	};
+	bindSubmit(submit);
+
+	setTitle(_title);
+
+	addButton(tr::lng_box_ok(), submit);
+	addButton(tr::lng_cancel(), [=] {
+		closeBox();
+	});
+
+	content->resizeToWidth(st::boxWidth);
+	content->moveToLeft(0, 0);
+	setDimensions(st::boxWidth, content->height());
+}
+
+[[nodiscard]] bool InvalidSummaryApiBaseUrl(QString value) {
+	const auto validated = qthelp::validate_url(value.trimmed());
+	if (validated.isEmpty()) {
+		return true;
+	}
+	const auto url = QUrl(validated);
+	return !url.isValid()
+		|| url.scheme().isEmpty()
+		|| !url.path().contains(u"/v1"_q);
+}
+
+[[nodiscard]] bool InvalidSummaryModel(QString value) {
+	return value.trimmed().isEmpty();
+}
+
+[[nodiscard]] QString SummaryApiBaseUrlLabel() {
+	const auto value = Core::App().settings().fork().summaryApiBaseUrl();
+	return value.isEmpty() ? u"Not set"_q : value;
+}
+
+[[nodiscard]] QString SummaryApiKeyLabel() {
+	return Core::App().settings().fork().summaryApiKey().isEmpty()
+		? u"Optional"_q
+		: u"Configured"_q;
+}
+
+[[nodiscard]] QString SummaryModelLabel() {
+	const auto value = Core::App().settings().fork().summaryModel();
+	return value.isEmpty() ? u"Not set"_q : value;
+}
+
 //////
 
 using namespace Builder;
@@ -255,6 +428,12 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	struct State {
 		rpl::variable<bool> checked;
 	};
+	struct SummaryLabels {
+		rpl::variable<QString> baseUrl = SummaryApiBaseUrlLabel();
+		rpl::variable<QString> apiKey = SummaryApiKeyLabel();
+		rpl::variable<QString> model = SummaryModelLabel();
+	};
+	const auto summaryLabels = std::make_shared<SummaryLabels>();
 
 	const auto add = [&](
 			auto id,
@@ -603,6 +782,92 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 		[](bool checked) {
 			Core::App().settings().fork().setArchivedStoriesAreHidden(checked);
 		});
+
+	builder.addSkip();
+	builder.addDivider();
+	builder.addSkip();
+
+	builder.addSubsectionTitle(rpl::single(u"Summarization"_q));
+	builder.addButton({
+		.id = u"fork/summarization/base_url"_q,
+		.title = rpl::single(u"Provider base URL"_q),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconNetwork },
+		.label = summaryLabels->baseUrl.value(),
+		.onClick = [=] {
+			controller->show(Box<TextValueBox>(
+				u"Summarization provider"_q,
+				u"Base URL including /v1"_q,
+				[] { return Core::App().settings().fork().summaryApiBaseUrl(); },
+				[=](QString value) {
+					const auto validated = qthelp::validate_url(value.trimmed());
+					Core::App().settings().fork().setSummaryApiBaseUrl(validated);
+					summaryLabels->baseUrl = SummaryApiBaseUrlLabel();
+				},
+				[](QString value) { return InvalidSummaryApiBaseUrl(value); }));
+		},
+		.keywords = {
+			u"summarization"_q,
+			u"summary"_q,
+			u"provider"_q,
+			u"base"_q,
+			u"url"_q,
+			u"v1"_q,
+		},
+	});
+	builder.addButton({
+		.id = u"fork/summarization/api_key"_q,
+		.title = rpl::single(u"API key"_q),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconLock },
+		.label = summaryLabels->apiKey.value(),
+		.onClick = [=] {
+			controller->show(Box<TextValueBox>(
+				u"Summarization API key"_q,
+				u"Optional"_q,
+				[] { return Core::App().settings().fork().summaryApiKey(); },
+				[=](QString value) {
+					Core::App().settings().fork().setSummaryApiKey(
+						value.trimmed());
+					summaryLabels->apiKey = SummaryApiKeyLabel();
+				},
+				[](QString) { return false; },
+				true));
+		},
+		.keywords = {
+			u"summarization"_q,
+			u"summary"_q,
+			u"api"_q,
+			u"key"_q,
+			u"token"_q,
+		},
+	});
+	builder.addButton({
+		.id = u"fork/summarization/model"_q,
+		.title = rpl::single(u"Model"_q),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconSettings },
+		.label = summaryLabels->model.value(),
+		.onClick = [=] {
+			controller->show(Box<TextValueBox>(
+				u"Summarization model"_q,
+				u"Model name"_q,
+				[] { return Core::App().settings().fork().summaryModel(); },
+				[=](QString value) {
+					Core::App().settings().fork().setSummaryModel(
+						value.trimmed());
+					summaryLabels->model = SummaryModelLabel();
+				},
+				[](QString value) { return InvalidSummaryModel(value); }));
+		},
+		.keywords = {
+			u"summarization"_q,
+			u"summary"_q,
+			u"model"_q,
+			u"llm"_q,
+			u"openai"_q,
+		},
+	});
 
 	builder.addSkip();
 	builder.addDivider();

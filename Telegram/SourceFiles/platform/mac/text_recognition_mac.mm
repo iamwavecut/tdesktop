@@ -31,12 +31,12 @@ Result RecognizeText(const QImage &image) {
 	}
 
 	@autoreleasepool {
-		CGImageRef cgImage = image.toCGImage();
+		CGImageRef cgImage = Q2CGImage(image);
 		if (!cgImage) {
 			return result;
 		}
 		CIImage *image = [CIImage imageWithCGImage:cgImage];
-		CFRelease(cgImage);
+		CGImageRelease(cgImage);
 
 		if (!image) {
 			return result;

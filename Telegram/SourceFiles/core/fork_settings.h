@@ -130,6 +130,25 @@ public:
 	[[nodiscard]] bool archivedStoriesAreHidden() const;
 	void setArchivedStoriesAreHidden(bool newValue);
 
+	[[nodiscard]] QString summaryApiBaseUrl() const {
+		return _summaryApiBaseUrl;
+	}
+	void setSummaryApiBaseUrl(QString newValue) {
+		_summaryApiBaseUrl = std::move(newValue);
+	}
+	[[nodiscard]] QString summaryApiKey() const {
+		return _summaryApiKey;
+	}
+	void setSummaryApiKey(QString newValue) {
+		_summaryApiKey = std::move(newValue);
+	}
+	[[nodiscard]] QString summaryModel() const {
+		return _summaryModel;
+	}
+	void setSummaryModel(QString newValue) {
+		_summaryModel = std::move(newValue);
+	}
+
 private:
 	bool _squareUserpics = false;
 	bool _audioFade = true;
@@ -155,8 +174,10 @@ private:
 	bool _additionalButtonsWebBot = false;
 	QString _botsPlatforms;
 	bool _archivedStoriesAreHidden = false;
+	QString _summaryApiBaseUrl;
+	QString _summaryApiKey;
+	QString _summaryModel;
 
 };
 
 } // namespace Core
-

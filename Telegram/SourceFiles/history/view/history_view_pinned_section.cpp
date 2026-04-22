@@ -371,6 +371,13 @@ bool PinnedWidget::cornerButtonsHas(CornerButtonType type) {
 		|| (type == CornerButtonType::PollVotes);
 }
 
+void PinnedWidget::cornerButtonsSummarizeDown() {
+}
+
+bool PinnedWidget::cornerButtonsSummarizeDownLoading() {
+	return false;
+}
+
 void PinnedWidget::showAtPosition(
 		Data::MessagePosition position,
 		FullMsgId originId) {

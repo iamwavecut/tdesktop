@@ -150,6 +150,8 @@ public:
 	std::optional<bool> cornerButtonsDownShown() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
+	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownLoading() override;
 
 private:
 	void resizeEvent(QResizeEvent *e) override;

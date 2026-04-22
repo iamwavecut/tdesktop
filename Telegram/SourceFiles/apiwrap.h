@@ -81,6 +81,7 @@ class Polls;
 class TodoLists;
 class ChatParticipants;
 class UnreadThings;
+class UnreadSummaries;
 class Ringtones;
 class ComposeWithAi;
 class Transcribes;
@@ -429,6 +430,7 @@ public:
 	[[nodiscard]] Api::TodoLists &todoLists();
 	[[nodiscard]] Api::ChatParticipants &chatParticipants();
 	[[nodiscard]] Api::UnreadThings &unreadThings();
+	[[nodiscard]] Api::UnreadSummaries &unreadSummaries();
 	[[nodiscard]] Api::Ringtones &ringtones();
 	[[nodiscard]] Api::ComposeWithAi &composeWithAi();
 	[[nodiscard]] Api::Transcribes &transcribes();
@@ -790,6 +792,7 @@ private:
 	const std::unique_ptr<Api::TodoLists> _todoLists;
 	const std::unique_ptr<Api::ChatParticipants> _chatParticipants;
 	const std::unique_ptr<Api::UnreadThings> _unreadThings;
+	const std::unique_ptr<Api::UnreadSummaries> _unreadSummaries;
 	const std::unique_ptr<Api::Ringtones> _ringtones;
 	const std::unique_ptr<Api::ComposeWithAi> _composeWithAi;
 	const std::unique_ptr<Api::Transcribes> _transcribes;

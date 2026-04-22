@@ -179,6 +179,8 @@ private:
 	std::optional<bool> cornerButtonsDownShown() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
+	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownLoading() override;
 
 	base::weak_qptr<Ui::RpWidget> createPinnedToBottom(
 		not_null<Ui::RpWidget*> parent) override;
@@ -1110,6 +1112,13 @@ bool ShortcutMessages::cornerButtonsUnreadMayBeShown() {
 
 bool ShortcutMessages::cornerButtonsHas(CornerButtonType type) {
 	return (type == CornerButtonType::Down);
+}
+
+void ShortcutMessages::cornerButtonsSummarizeDown() {
+}
+
+bool ShortcutMessages::cornerButtonsSummarizeDownLoading() {
+	return false;
 }
 
 void ShortcutMessages::checkReplyReturns() {

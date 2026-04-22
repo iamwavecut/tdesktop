@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_report.h"
 #include "api/api_sending.h"
 #include "api/api_send_progress.h"
+#include "api/api_unread_summaries.h"
 #include "api/api_unread_things.h"
 #include "base/random.h"
 #include "boxes/compose_ai_box.h"
@@ -150,6 +151,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_timecode_action.h"
 #include "mtproto/mtproto_config.h"
 #include "lang/lang_keys.h"
+#include "settings/sections/settings_fork.h"
 #include "settings/business/settings_quick_replies.h"
 #include "settings/settings_credits_graphics.h"
 #include "storage/localimageloader.h"
@@ -1100,6 +1102,11 @@ HistoryWidget::HistoryWidget(
 		if (action.options.handleSupportSwitch) {
 			handleSupportSwitch(action.history);
 		}
+	}, lifetime());
+	session().api().unreadSummaries().changes(
+	) | rpl::on_next([=](const Api::UnreadSummaries::ThreadKey &) {
+		syncUnreadSummaryState(true);
+		_cornerButtons.updateJumpDownVisibility();
 	}, lifetime());
 
 	_selfForwardsTagger = std::make_unique<HistoryView::SelfForwardsTagger>(
@@ -4224,6 +4231,7 @@ void HistoryWidget::messagesReceived(
 
 void HistoryWidget::historyLoaded() {
 	_historyInited = false;
+	syncUnreadSummaryState(false);
 	doneShow();
 }
 
@@ -5449,7 +5457,50 @@ void HistoryWidget::cornerButtonsShowAtPosition(
 	}
 }
 
+void HistoryWidget::syncUnreadSummaryState(bool allowAutoScroll) {
+	if (!_history) {
+		_unreadSummaryPeerId = 0;
+		_unreadSummaryTopicRootId = 0;
+		_unreadSummaryMonoforumPeerId = 0;
+		_unreadSummaryVersion = 0;
+		return;
+	}
+	auto &summaries = session().api().unreadSummaries();
+	summaries.restore(_history);
+	const auto entry = summaries.entry(_history);
+	const auto key = Api::UnreadSummaries::Key(_history);
+	const auto sameThread = (_unreadSummaryPeerId == key.peerId)
+		&& (_unreadSummaryTopicRootId == key.topicRootId)
+		&& (_unreadSummaryMonoforumPeerId == key.monoforumPeerId);
+	if (!sameThread) {
+		_unreadSummaryPeerId = key.peerId;
+		_unreadSummaryTopicRootId = key.topicRootId;
+		_unreadSummaryMonoforumPeerId = key.monoforumPeerId;
+		_unreadSummaryVersion = entry.version;
+	} else if (allowAutoScroll && entry.version > _unreadSummaryVersion) {
+		_unreadSummaryVersion = entry.version;
+		const auto history = _history;
+		const auto shownItemId = entry.shownItemId;
+		crl::on_main(this, [=] {
+			if (_history != history) {
+				return;
+			}
+			if (const auto item = history->owner().message(shownItemId);
+				item && (item->history() != history)) {
+				return;
+			}
+			showHistory(
+				history->peer->id,
+				ShowAtTheEndMsgId,
+				Window::SectionShow(anim::type::instant));
+		});
+	} else {
+		_unreadSummaryVersion = entry.version;
+	}
+}
+
 Data::Thread *HistoryWidget::cornerButtonsThread() {
+	syncUnreadSummaryState(false);
 	return _history;
 }
 
@@ -7921,6 +7972,29 @@ bool HistoryWidget::cornerButtonsUnreadMayBeShown() {
 
 bool HistoryWidget::cornerButtonsHas(HistoryView::CornerButtonType type) {
 	return true;
+}
+
+void HistoryWidget::cornerButtonsSummarizeDown() {
+	if (!_history) {
+		return;
+	}
+	auto &summaries = session().api().unreadSummaries();
+	if (!summaries.configured()) {
+		controller()->showSettings(Settings::ForkId());
+		return;
+	}
+	switch (summaries.request(_history)) {
+	case Api::UnreadSummaries::StartResult::Started:
+	case Api::UnreadSummaries::StartResult::AlreadyLoading:
+		_cornerButtons.updateJumpDownVisibility();
+		break;
+	case Api::UnreadSummaries::StartResult::InvalidConfig:
+		break;
+	}
+}
+
+bool HistoryWidget::cornerButtonsSummarizeDownLoading() {
+	return _history && session().api().unreadSummaries().loading(_history);
 }
 
 void HistoryWidget::mousePressEvent(QMouseEvent *e) {

@@ -56,6 +56,8 @@ public:
 	[[nodiscard]] virtual std::optional<bool> cornerButtonsDownShown() = 0;
 	[[nodiscard]] virtual bool cornerButtonsUnreadMayBeShown() = 0;
 	[[nodiscard]] virtual bool cornerButtonsHas(CornerButtonType type) = 0;
+	virtual void cornerButtonsSummarizeDown() = 0;
+	[[nodiscard]] virtual bool cornerButtonsSummarizeDownLoading() = 0;
 };
 
 class CornerButtons final : private QObject {
@@ -72,6 +74,7 @@ public:
 	using Type = CornerButtonType;
 
 	void downClick();
+	void summarizeDownClick();
 	void mentionsClick();
 	void reactionsClick();
 	void pollVotesClick();

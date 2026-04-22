@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_compose_with_ai.h"
 #include "api/api_transcribes.h"
 #include "api/api_premium.h"
+#include "api/api_unread_summaries.h"
 #include "api/api_user_names.h"
 #include "api/api_websites.h"
 #include "data/business/data_shortcut_messages.h"
@@ -193,6 +194,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _todoLists(std::make_unique<Api::TodoLists>(this))
 , _chatParticipants(std::make_unique<Api::ChatParticipants>(this))
 , _unreadThings(std::make_unique<Api::UnreadThings>(this))
+, _unreadSummaries(std::make_unique<Api::UnreadSummaries>(this))
 , _ringtones(std::make_unique<Api::Ringtones>(this))
 , _composeWithAi(std::make_unique<Api::ComposeWithAi>(this))
 , _transcribes(std::make_unique<Api::Transcribes>(this))
@@ -5051,6 +5053,10 @@ Api::ChatParticipants &ApiWrap::chatParticipants() {
 
 Api::UnreadThings &ApiWrap::unreadThings() {
 	return *_unreadThings;
+}
+
+Api::UnreadSummaries &ApiWrap::unreadSummaries() {
+	return *_unreadSummaries;
 }
 
 Api::Ringtones &ApiWrap::ringtones() {

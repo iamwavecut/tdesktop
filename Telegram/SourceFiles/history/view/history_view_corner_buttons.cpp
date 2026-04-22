@@ -63,23 +63,32 @@ CornerButtons::CornerButtons(
 , _down(
 	parent,
 	st->value(_stLifetime, st::historyToDown))
-, _summarizeDown(
-	parent,
-	st->value(_stLifetime, st::historySummarizeDown))
-, _mentions(
-	parent,
-	st->value(_stLifetime, st::historyUnreadMentions))
-, _reactions(
+	, _summarizeDown(
+		parent,
+		st->value(_stLifetime, st::historySummarizeDown))
+	, _mentions(
+		parent,
+		st->value(_stLifetime, st::historyUnreadMentions))
+	, _reactions(
 		parent,
 		st->value(_stLifetime, st::historyUnreadReactions))
-, _pollVotes(
+	, _pollVotes(
 		parent,
 		st->value(_stLifetime, st::historyUnreadPollVotes)) {
+	const auto &summarizeDownLoading = st->value(
+		_stLifetime,
+		st::historySummarizeDownLoadingAbove);
+	const auto &summarizeDownLoadingOver = st->value(
+		_stLifetime,
+		st::historySummarizeDownLoadingAboveOver);
 	_down.widget->addClickHandler([=] { downClick(); });
-	_summarizeDown.widget->addClickHandler([=] { downClick(); });
+	_summarizeDown.widget->addClickHandler([=] { summarizeDownClick(); });
 	_mentions.widget->addClickHandler([=] { mentionsClick(); });
 	_reactions.widget->addClickHandler([=] { reactionsClick(); });
 	_pollVotes.widget->addClickHandler([=] { pollVotesClick(); });
+	_summarizeDown.widget->setLoadingIcons(
+		&summarizeDownLoading,
+		&summarizeDownLoadingOver);
 
 	const auto filterScroll = [&](CornerButton &button) {
 		button.widget->installEventFilter(this);
@@ -119,6 +128,13 @@ void CornerButtons::downClick() {
 	} else {
 		_delegate->cornerButtonsShowAtPosition(_replyReturn->position());
 	}
+}
+
+void CornerButtons::summarizeDownClick() {
+	if (_summarizeDown.widget->loading()) {
+		return;
+	}
+	_delegate->cornerButtonsSummarizeDown();
 }
 
 void CornerButtons::mentionsClick() {
@@ -328,10 +344,12 @@ void CornerButtons::updateJumpDownVisibility(std::optional<int> counter) {
 		_unreadCount = *counter;
 		_down.widget->setUnreadCount(_unreadCount);
 	}
+	const auto summarizeLoading = _delegate->cornerButtonsSummarizeDownLoading();
+	_summarizeDown.widget->setLoading(summarizeLoading);
 	updateVisibility(
 		Type::SummarizeDown,
 		_delegate->cornerButtonsHas(Type::SummarizeDown)
-			&& _unreadCount > 0
+			&& (summarizeLoading || _unreadCount > 20)
 			&& (shown ? *shown : _down.shown));
 }
 

@@ -981,6 +981,13 @@ bool ScheduledWidget::cornerButtonsHas(CornerButtonType type) {
 	return (type == CornerButtonType::Down);
 }
 
+void ScheduledWidget::cornerButtonsSummarizeDown() {
+}
+
+bool ScheduledWidget::cornerButtonsSummarizeDownLoading() {
+	return false;
+}
+
 void ScheduledWidget::showAtPosition(
 		Data::MessagePosition position,
 		FullMsgId originId) {

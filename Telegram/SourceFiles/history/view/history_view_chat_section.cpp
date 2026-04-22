@@ -45,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_participants.h"
 #include "api/api_editing.h"
 #include "api/api_sending.h"
+#include "api/api_unread_summaries.h"
 #include "apiwrap.h"
 #include "ui/boxes/confirm_box.h"
 #include "chat_helpers/message_field.h"
@@ -58,6 +59,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "core/application.h"
+#include "settings/sections/settings_fork.h"
 #include "core/shortcuts.h"
 #include "core/click_handler_types.h"
 #include "core/mime_type.h"
@@ -457,6 +459,11 @@ ChatWidget::ChatWidget(
 			}
 		}, lifetime());
 	}
+	session().api().unreadSummaries().changes(
+	) | rpl::on_next([=](const Api::UnreadSummaries::ThreadKey &) {
+		syncUnreadSummaryState(true);
+		_cornerButtons.updateJumpDownVisibility();
+	}, lifetime());
 
 	_selfForwardsTagger = std::make_unique<HistoryView::SelfForwardsTagger>(
 		controller,
@@ -2250,7 +2257,68 @@ void ChatWidget::cornerButtonsShowAtPosition(
 	showAtPosition(position);
 }
 
+void ChatWidget::syncUnreadSummaryState(bool allowAutoScroll) {
+	const auto thread = (_sublist
+		? static_cast<Data::Thread*>(_sublist)
+		: _topic
+		? static_cast<Data::Thread*>(_topic)
+		: static_cast<Data::Thread*>(_history));
+	if (!thread) {
+		_unreadSummaryPeerId = 0;
+		_unreadSummaryTopicRootId = 0;
+		_unreadSummaryMonoforumPeerId = 0;
+		_unreadSummaryVersion = 0;
+		return;
+	}
+	auto &summaries = session().api().unreadSummaries();
+	summaries.restore(thread);
+	const auto entry = summaries.entry(thread);
+	const auto key = Api::UnreadSummaries::Key(thread);
+	const auto sameThread = (_unreadSummaryPeerId == key.peerId)
+		&& (_unreadSummaryTopicRootId == key.topicRootId)
+		&& (_unreadSummaryMonoforumPeerId == key.monoforumPeerId);
+	if (!sameThread) {
+		_unreadSummaryPeerId = key.peerId;
+		_unreadSummaryTopicRootId = key.topicRootId;
+		_unreadSummaryMonoforumPeerId = key.monoforumPeerId;
+		_unreadSummaryVersion = entry.version;
+	} else if (allowAutoScroll && entry.version > _unreadSummaryVersion) {
+		_unreadSummaryVersion = entry.version;
+		const auto expectedThread = thread;
+		const auto shownItemId = entry.shownItemId;
+		crl::on_main(this, [=] {
+			const auto currentThread = (_sublist
+				? static_cast<Data::Thread*>(_sublist)
+				: _topic
+				? static_cast<Data::Thread*>(_topic)
+				: static_cast<Data::Thread*>(_history));
+			if (currentThread != expectedThread) {
+				return;
+			}
+			if (const auto item = expectedThread->owner().message(shownItemId)) {
+				const auto matchesThread = _sublist
+					? (item->savedSublist() == _sublist)
+					: _topic
+					? (item->topic() == _topic)
+					: (item->history() == _history)
+						&& !item->topic()
+						&& !item->savedSublist();
+				if (!matchesThread) {
+					return;
+				}
+			}
+			showAtPosition(
+				Data::MaxMessagePosition,
+				FullMsgId(),
+				Window::SectionShow(anim::type::instant));
+		});
+	} else {
+		_unreadSummaryVersion = entry.version;
+	}
+}
+
 Data::Thread *ChatWidget::cornerButtonsThread() {
+	syncUnreadSummaryState(false);
 	return _sublist
 		? static_cast<Data::Thread*>(_sublist)
 		: _topic
@@ -2291,6 +2359,33 @@ bool ChatWidget::cornerButtonsHas(CornerButtonType type) {
 		|| (_sublist && type == CornerButtonType::Reactions)
 		|| (type == CornerButtonType::Down)
 		|| (type == CornerButtonType::SummarizeDown);
+}
+
+void ChatWidget::cornerButtonsSummarizeDown() {
+	const auto thread = cornerButtonsThread();
+	if (!thread) {
+		return;
+	}
+	auto &summaries = session().api().unreadSummaries();
+	if (!summaries.configured()) {
+		controller()->showSettings(Settings::ForkId());
+		return;
+	}
+	switch (summaries.request(thread)) {
+	case Api::UnreadSummaries::StartResult::Started:
+	case Api::UnreadSummaries::StartResult::AlreadyLoading:
+		_cornerButtons.updateJumpDownVisibility();
+		break;
+	case Api::UnreadSummaries::StartResult::InvalidConfig:
+		break;
+	}
+}
+
+bool ChatWidget::cornerButtonsSummarizeDownLoading() {
+	if (const auto thread = cornerButtonsThread()) {
+		return session().api().unreadSummaries().loading(thread);
+	}
+	return false;
 }
 
 void ChatWidget::showAtStart() {
@@ -2992,6 +3087,7 @@ void ChatWidget::listTryProcessKeyInput(not_null<QKeyEvent*> e) {
 void ChatWidget::markLoaded() {
 	if (!_loaded) {
 		_loaded = true;
+		syncUnreadSummaryState(false);
 		crl::on_main(this, [=] {
 			updatePinnedVisibility();
 		});

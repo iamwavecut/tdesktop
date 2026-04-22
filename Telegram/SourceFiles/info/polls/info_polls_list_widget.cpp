@@ -193,6 +193,8 @@ private:
 	std::optional<bool> cornerButtonsDownShown() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(HistoryView::CornerButtonType type) override;
+	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownLoading() override;
 
 	const not_null<Controller*> _controller;
 	const not_null<Main::Session*> _session;
@@ -831,6 +833,13 @@ bool ListWidget::Inner::cornerButtonsHas(
 		HistoryView::CornerButtonType type) {
 	return (type == HistoryView::CornerButtonType::Down)
 		|| (type == HistoryView::CornerButtonType::PollVotes);
+}
+
+void ListWidget::Inner::cornerButtonsSummarizeDown() {
+}
+
+bool ListWidget::Inner::cornerButtonsSummarizeDownLoading() {
+	return false;
 }
 
 // --- ListMemento ---

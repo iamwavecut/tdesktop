@@ -29,7 +29,10 @@ QByteArray ForkSettings::serialize() const {
 		+ Serialize::stringSize(_searchEngineUrl)
 		+ sizeof(qint32) * 13
 		+ sizeof(qint32) * 2
-		+ Serialize::stringSize(_botsPlatforms);
+		+ Serialize::stringSize(_botsPlatforms)
+		+ Serialize::stringSize(_summaryApiBaseUrl)
+		+ Serialize::stringSize(_summaryApiKey)
+		+ Serialize::stringSize(_summaryModel);
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -61,6 +64,9 @@ QByteArray ForkSettings::serialize() const {
 			<< qint32(_additionalButtonsWebBot ? 1 : 0)
 			<< _botsPlatforms
 			<< qint32(_archivedStoriesAreHidden ? 1 : 0)
+			<< _summaryApiBaseUrl
+			<< _summaryApiKey
+			<< _summaryModel
 			;
 	}
 	return result;
@@ -98,6 +104,9 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	qint32 additionalButtonsWebBot = _additionalButtonsWebBot;
 	qint32 archivedStoriesAreHidden = _archivedStoriesAreHidden;
 	QString botsPlatforms = _botsPlatforms;
+	QString summaryApiBaseUrl = _summaryApiBaseUrl;
+	QString summaryApiKey = _summaryApiKey;
+	QString summaryModel = _summaryModel;
 
 	if (!stream.atEnd()) {
 		stream
@@ -145,6 +154,15 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> archivedStoriesAreHidden;
 	}
+	if (!stream.atEnd()) {
+		stream >> summaryApiBaseUrl;
+	}
+	if (!stream.atEnd()) {
+		stream >> summaryApiKey;
+	}
+	if (!stream.atEnd()) {
+		stream >> summaryModel;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::ForkSettings::constructFromSerialized()"));
@@ -176,6 +194,9 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	_additionalButtonsWebBot = (additionalButtonsWebBot == 1);
 	_archivedStoriesAreHidden = (archivedStoriesAreHidden == 1);
 	_botsPlatforms = std::move(botsPlatforms);
+	_summaryApiBaseUrl = std::move(summaryApiBaseUrl);
+	_summaryApiKey = std::move(summaryApiKey);
+	_summaryModel = std::move(summaryModel);
 }
 
 void ForkSettings::resetOnLastLogout() {
@@ -202,6 +223,9 @@ void ForkSettings::resetOnLastLogout() {
 	_additionalButtonsWebBot = false;
 	_archivedStoriesAreHidden = false;
 	_botsPlatforms = QString();
+	_summaryApiBaseUrl = QString();
+	_summaryApiKey = QString();
+	_summaryModel = QString();
 }
 
 [[nodiscard]] bool ForkSettings::primaryUnmutedMessages() const {
