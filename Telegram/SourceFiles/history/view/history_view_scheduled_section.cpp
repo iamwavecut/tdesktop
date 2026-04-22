@@ -984,6 +984,10 @@ bool ScheduledWidget::cornerButtonsHas(CornerButtonType type) {
 void ScheduledWidget::cornerButtonsSummarizeDown() {
 }
 
+bool ScheduledWidget::cornerButtonsSummarizeDownActive() {
+	return false;
+}
+
 bool ScheduledWidget::cornerButtonsSummarizeDownLoading() {
 	return false;
 }

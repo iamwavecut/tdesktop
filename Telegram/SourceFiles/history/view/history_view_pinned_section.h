@@ -151,6 +151,7 @@ public:
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownActive() override;
 	bool cornerButtonsSummarizeDownLoading() override;
 
 private:

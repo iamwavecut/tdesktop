@@ -374,6 +374,10 @@ bool PinnedWidget::cornerButtonsHas(CornerButtonType type) {
 void PinnedWidget::cornerButtonsSummarizeDown() {
 }
 
+bool PinnedWidget::cornerButtonsSummarizeDownActive() {
+	return false;
+}
+
 bool PinnedWidget::cornerButtonsSummarizeDownLoading() {
 	return false;
 }

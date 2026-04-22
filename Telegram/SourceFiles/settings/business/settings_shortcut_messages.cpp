@@ -180,6 +180,7 @@ private:
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownActive() override;
 	bool cornerButtonsSummarizeDownLoading() override;
 
 	base::weak_qptr<Ui::RpWidget> createPinnedToBottom(
@@ -1115,6 +1116,10 @@ bool ShortcutMessages::cornerButtonsHas(CornerButtonType type) {
 }
 
 void ShortcutMessages::cornerButtonsSummarizeDown() {
+}
+
+bool ShortcutMessages::cornerButtonsSummarizeDownActive() {
+	return false;
 }
 
 bool ShortcutMessages::cornerButtonsSummarizeDownLoading() {

@@ -345,11 +345,13 @@ void CornerButtons::updateJumpDownVisibility(std::optional<int> counter) {
 		_down.widget->setUnreadCount(_unreadCount);
 	}
 	const auto summarizeLoading = _delegate->cornerButtonsSummarizeDownLoading();
+	const auto summarizeActive = _delegate->cornerButtonsSummarizeDownActive();
+	_summarizeDown.widget->setActive(summarizeActive);
 	_summarizeDown.widget->setLoading(summarizeLoading);
 	updateVisibility(
 		Type::SummarizeDown,
 		_delegate->cornerButtonsHas(Type::SummarizeDown)
-			&& (summarizeLoading || _unreadCount > 20)
+			&& (summarizeActive || summarizeLoading || _unreadCount > 20)
 			&& (shown ? *shown : _down.shown));
 }
 

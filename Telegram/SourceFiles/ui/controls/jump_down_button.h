@@ -21,9 +21,13 @@ public:
 	void setLoadingIcons(
 		const style::icon *icon,
 		const style::icon *iconOver);
+	void setActive(bool active);
 	void setLoading(bool loading);
 	[[nodiscard]] int unreadCount() const {
 		return _unreadCount;
+	}
+	[[nodiscard]] bool active() const {
+		return _active;
 	}
 	[[nodiscard]] bool loading() const;
 
@@ -40,6 +44,7 @@ private:
 	const style::TwoIconButton &_st;
 
 	int _unreadCount = 0;
+	bool _active = false;
 	bool _loadingActive = false;
 	const style::icon *_loadingIcon = nullptr;
 	const style::icon *_loadingIconOver = nullptr;

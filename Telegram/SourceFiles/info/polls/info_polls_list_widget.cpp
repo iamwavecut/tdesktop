@@ -194,6 +194,7 @@ private:
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(HistoryView::CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownActive() override;
 	bool cornerButtonsSummarizeDownLoading() override;
 
 	const not_null<Controller*> _controller;
@@ -836,6 +837,10 @@ bool ListWidget::Inner::cornerButtonsHas(
 }
 
 void ListWidget::Inner::cornerButtonsSummarizeDown() {
+}
+
+bool ListWidget::Inner::cornerButtonsSummarizeDownActive() {
+	return false;
 }
 
 bool ListWidget::Inner::cornerButtonsSummarizeDownLoading() {

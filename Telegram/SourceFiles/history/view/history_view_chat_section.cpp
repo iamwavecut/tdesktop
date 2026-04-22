@@ -2381,6 +2381,13 @@ void ChatWidget::cornerButtonsSummarizeDown() {
 	}
 }
 
+bool ChatWidget::cornerButtonsSummarizeDownActive() {
+	if (const auto thread = cornerButtonsThread()) {
+		return session().api().unreadSummaries().shown(thread);
+	}
+	return false;
+}
+
 bool ChatWidget::cornerButtonsSummarizeDownLoading() {
 	if (const auto thread = cornerButtonsThread()) {
 		return session().api().unreadSummaries().loading(thread);

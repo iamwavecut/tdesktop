@@ -76,6 +76,7 @@ public:
 
 	[[nodiscard]] bool configured() const;
 	[[nodiscard]] bool loading(not_null<const Data::Thread*> thread) const;
+	[[nodiscard]] bool shown(not_null<const Data::Thread*> thread) const;
 	[[nodiscard]] const Entry &entry(not_null<const Data::Thread*> thread) const;
 	[[nodiscard]] rpl::producer<ThreadKey> changes() const;
 

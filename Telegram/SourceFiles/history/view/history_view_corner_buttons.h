@@ -57,6 +57,7 @@ public:
 	[[nodiscard]] virtual bool cornerButtonsUnreadMayBeShown() = 0;
 	[[nodiscard]] virtual bool cornerButtonsHas(CornerButtonType type) = 0;
 	virtual void cornerButtonsSummarizeDown() = 0;
+	[[nodiscard]] virtual bool cornerButtonsSummarizeDownActive() = 0;
 	[[nodiscard]] virtual bool cornerButtonsSummarizeDownLoading() = 0;
 };
 

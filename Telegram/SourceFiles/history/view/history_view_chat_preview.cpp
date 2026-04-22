@@ -184,6 +184,7 @@ private:
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownActive() override;
 	bool cornerButtonsSummarizeDownLoading() override;
 
 	const not_null<QAction*> _dummyAction;
@@ -954,6 +955,10 @@ bool Item::cornerButtonsHas(CornerButtonType type) {
 }
 
 void Item::cornerButtonsSummarizeDown() {
+}
+
+bool Item::cornerButtonsSummarizeDownActive() {
+	return false;
 }
 
 bool Item::cornerButtonsSummarizeDownLoading() {

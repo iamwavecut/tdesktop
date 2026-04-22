@@ -57,7 +57,6 @@ private:
 	bool _summarizeHovered = false;
 	bool _loading = false;
 	bool _opened = false;
-	bool _summaryShown = false;
 
 };
 

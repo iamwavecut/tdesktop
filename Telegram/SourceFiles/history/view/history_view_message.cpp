@@ -733,9 +733,11 @@ QSize Message::performCountOptimalSize() {
 	const auto oldKey = reactionsKey();
 	if (_summarize) {
 		const auto &summary = item->summaryEntry();
+		const auto update = [=] { repaint(); };
 		if (_summarize->loading() != summary.loading) {
 			_summarize->setLoading(summary.loading);
 		}
+		_summarize->setOpened(summary.shown, update);
 	}
 	validateText();
 	validateInlineKeyboard(markup);

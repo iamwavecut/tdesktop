@@ -142,24 +142,7 @@ void TranscribeButton::paint(
 					r.width());
 			}
 			if (!staticLoading) [[likely]] {
-				const auto shown = _item->history()
-					->session().api().transcribes().summary(_item).shown;
-				if (_summaryShown != shown) {
-					_summaryShown = shown;
-					const auto session = &_item->history()->session();
-					_openedAnimation.start(
-						[=, itemId = _item->fullId()] {
-							if (const auto i = session->data().message(
-									itemId)) {
-								session->data().requestItemRepaint(i);
-							}
-						},
-						shown ? 0. : 1.,
-						shown ? 1. : 0.,
-						st::fadeWrapDuration);
-				}
-				const auto t
-					= _openedAnimation.value(_summaryShown ? 1. : 0.);
+				const auto t = _openedAnimation.value(_opened ? 1. : 0.);
 
 				const auto fg = context.st->msgServiceFg()->c;
 				st::historySummaryStars.paintInCenter(p, r, fg);

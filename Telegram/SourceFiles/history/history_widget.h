@@ -382,6 +382,7 @@ private:
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(HistoryView::CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
+	bool cornerButtonsSummarizeDownActive() override;
 	bool cornerButtonsSummarizeDownLoading() override;
 
 	[[nodiscard]] bool checkSendPayment(

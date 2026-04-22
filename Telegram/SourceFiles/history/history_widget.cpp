@@ -7993,6 +7993,10 @@ void HistoryWidget::cornerButtonsSummarizeDown() {
 	}
 }
 
+bool HistoryWidget::cornerButtonsSummarizeDownActive() {
+	return _history && session().api().unreadSummaries().shown(_history);
+}
+
 bool HistoryWidget::cornerButtonsSummarizeDownLoading() {
 	return _history && session().api().unreadSummaries().loading(_history);
 }

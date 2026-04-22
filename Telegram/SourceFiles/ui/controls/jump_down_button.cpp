@@ -44,6 +44,14 @@ void JumpDownButton::setLoadingIcons(
 	_loadingIconOver = iconOver;
 }
 
+void JumpDownButton::setActive(bool active) {
+	if (_active == active) {
+		return;
+	}
+	_active = active;
+	update();
+}
+
 QPoint JumpDownButton::prepareRippleStartPosition() const {
 	return mapFromGlobal(QCursor::pos()) - _st.rippleAreaPosition;
 }
@@ -53,6 +61,7 @@ void JumpDownButton::paintEvent(QPaintEvent *e) {
 
 	const auto over = isOver();
 	const auto down = isDown();
+	const auto active = over || down || _active;
 	const auto loadingState = _loading
 		? _loading->computeState()
 		: RadialState{ 0., 0, RadialState::kFull };
@@ -62,9 +71,8 @@ void JumpDownButton::paintEvent(QPaintEvent *e) {
 		}
 		const auto wasOpacity = p.opacity();
 		p.setOpacity(wasOpacity * opacity);
-		((over || down)
-			? *_loadingIconOver
-			: *_loadingIcon).paint(p, _st.iconPosition, width());
+		const auto &icon = active ? *_loadingIconOver : *_loadingIcon;
+		icon.paint(p, _st.iconPosition, width());
 		p.setOpacity(wasOpacity);
 		return true;
 	};
@@ -74,12 +82,10 @@ void JumpDownButton::paintEvent(QPaintEvent *e) {
 		}
 		const auto wasOpacity = p.opacity();
 		p.setOpacity(wasOpacity * opacity);
-		((over || down)
-			? _st.iconBelowOver
-			: _st.iconBelow).paint(p, _st.iconPosition, width());
-		((over || down)
-			? _st.iconAboveOver
-			: _st.iconAbove).paint(p, _st.iconPosition, width());
+		const auto &below = active ? _st.iconBelowOver : _st.iconBelow;
+		const auto &above = active ? _st.iconAboveOver : _st.iconAbove;
+		below.paint(p, _st.iconPosition, width());
+		above.paint(p, _st.iconPosition, width());
 		p.setOpacity(wasOpacity);
 	};
 
@@ -107,7 +113,7 @@ void JumpDownButton::paintEvent(QPaintEvent *e) {
 			inner = rect().marginsRemoved(QMargins(14, 14, 14, 14));
 		}
 		const auto line = style::ConvertScaleExact(st::historyEmojiCircleLine);
-		const auto color = (over || down)
+		const auto color = active
 			? st::historyEmojiCircleFgOver
 			: st::historyEmojiCircleFg;
 		if (anim::Disabled() && _loading && _loading->animating()) {

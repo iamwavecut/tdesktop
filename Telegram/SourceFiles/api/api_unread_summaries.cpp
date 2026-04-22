@@ -293,14 +293,14 @@ void EnsureServiceNotificationsUser(not_null<Main::Session*> session) {
 }
 
 [[nodiscard]] bool ThreadContainsItem(
-		not_null<Data::Thread*> thread,
-		not_null<HistoryItem*> item) {
-	if (const auto topic = dynamic_cast<Data::ForumTopic*>(thread.get())) {
+		not_null<const Data::Thread*> thread,
+		not_null<const HistoryItem*> item) {
+	if (const auto topic = dynamic_cast<const Data::ForumTopic*>(thread.get())) {
 		return item->topic() == topic;
-	} else if (const auto sublist = dynamic_cast<Data::SavedSublist*>(
+	} else if (const auto sublist = dynamic_cast<const Data::SavedSublist*>(
 			thread.get())) {
 		return item->savedSublist() == sublist;
-	} else if (const auto history = dynamic_cast<History*>(thread.get())) {
+	} else if (const auto history = dynamic_cast<const History*>(thread.get())) {
 		return (item->history() == history)
 			&& !item->topic()
 			&& !item->savedSublist();
@@ -348,6 +348,15 @@ bool UnreadSummaries::loading(not_null<const Data::Thread*> thread) const {
 		return found->entry.loading;
 	}
 	return false;
+}
+
+bool UnreadSummaries::shown(not_null<const Data::Thread*> thread) const {
+	const auto found = lookup(Key(thread));
+	if (!found || !found->entry.shownItemId) {
+		return false;
+	}
+	const auto item = thread->owner().message(found->entry.shownItemId);
+	return item && ThreadContainsItem(thread, item);
 }
 
 const UnreadSummaries::Entry &UnreadSummaries::entry(
