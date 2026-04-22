@@ -2162,7 +2162,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			std::shared_ptr<PollMediaState> media,
 			ValidateFn validate,
 			ApplyDropFn apply) {
-		field->setMimeDataHook([=](
+		field->setMimeDataHook(WrappedMessageFieldMimeHook([=](
 				not_null<const QMimeData*> data,
 				Ui::InputField::MimeAction action) {
 			if (action == Ui::InputField::MimeAction::Check) {
@@ -2171,7 +2171,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 				return apply(media, data);
 			}
 			Unexpected("Polls: action in MimeData hook.");
-		});
+		}, field));
 	};
 	const auto applyPhotoOrVideoDrop = ApplyDropFn([=](
 			std::shared_ptr<PollMediaState> media,

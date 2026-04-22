@@ -589,7 +589,7 @@ void EditCaptionBox::setupField() {
 	) | rpl::on_next([=] {
 		captionResized();
 	}, _field->lifetime());
-	_field->setMimeDataHook([=](
+	_field->setMimeDataHook(WrappedMessageFieldMimeHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
 		if (action == Ui::InputField::MimeAction::Check) {
@@ -603,7 +603,7 @@ void EditCaptionBox::setupField() {
 			return fileFromClipboard(data);
 		}
 		Unexpected("Action in MimeData hook.");
-	});
+	}, _field));
 
 	_aiButton = Ui::SetupCaptionAiButton({
 		.parent = this,

@@ -1845,7 +1845,7 @@ void SendFilesBox::setupCaption() {
 		requestToTakeTextWithTags();
 		closeBox();
 	}, _caption->lifetime());
-	_caption->setMimeDataHook([=](
+	_caption->setMimeDataHook(WrappedMessageFieldMimeHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
 		if (action == Ui::InputField::MimeAction::Check) {
@@ -1854,7 +1854,7 @@ void SendFilesBox::setupCaption() {
 			return addFiles(data);
 		}
 		Unexpected("action in MimeData hook.");
-	});
+	}, _caption));
 
 	updateCaptionVisibility();
 	setupEmojiPanel();

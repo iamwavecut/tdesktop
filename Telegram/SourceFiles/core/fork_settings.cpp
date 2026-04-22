@@ -5,6 +5,10 @@ Author: 23rd.
 
 #include "storage/serialize_common.h"
 
+#include <QtCore/QUrl>
+
+#include <algorithm>
+
 namespace Core {
 
 namespace {
@@ -13,13 +17,55 @@ constexpr auto kDefaultStickerSize = 256;
 
 bool StaticPrimaryUnmutedMessages = false;
 
+[[nodiscard]] std::vector<LinkRewriteRule> NormalizeLinkRewrites(
+		std::vector<LinkRewriteRule> rules) {
+	for (auto &rule : rules) {
+		rule.sourceHost = ForkSettings::NormalizeLinkRewriteHost(
+			std::move(rule.sourceHost));
+		rule.targetHost = ForkSettings::NormalizeLinkRewriteHost(
+			std::move(rule.targetHost));
+	}
+	rules.erase(
+		ranges::remove_if(rules, [](const LinkRewriteRule &rule) {
+			return rule.sourceHost.isEmpty() || rule.targetHost.isEmpty();
+		}),
+		end(rules));
+	return rules;
+}
+
 } // namespace
 
 ForkSettings::ForkSettings() {
+	_linkRewrites = DefaultLinkRewrites();
 }
 
 bool ForkSettings::PrimaryUnmutedMessages() {
 	return StaticPrimaryUnmutedMessages;
+}
+
+QString ForkSettings::NormalizeLinkRewriteHost(QString value) {
+	value = value.trimmed().toLower();
+	if (value.isEmpty()
+		|| value.contains(u"://"_q)
+		|| value.contains(QChar(u'/'))
+		|| value.contains(QChar(u'?'))
+		|| value.contains(QChar(u'#'))
+		|| value.contains(QChar(u'@'))) {
+		return QString();
+	}
+	const auto parsed = QUrl(u"https://"_q + value + u"/"_q);
+	const auto host = parsed.host().toLower();
+	return (parsed.isValid() && !host.isEmpty() && host == value)
+		? host
+		: QString();
+}
+
+const std::vector<LinkRewriteRule> &ForkSettings::DefaultLinkRewrites() {
+	static const auto result = std::vector<LinkRewriteRule>{
+		{ u"x.com"_q, u"fixupx.com"_q },
+		{ u"instagram.com"_q, u"eeinstagram.com"_q },
+	};
+	return result;
 }
 
 QByteArray ForkSettings::serialize() const {
@@ -32,7 +78,12 @@ QByteArray ForkSettings::serialize() const {
 		+ Serialize::stringSize(_botsPlatforms)
 		+ Serialize::stringSize(_summaryApiBaseUrl)
 		+ Serialize::stringSize(_summaryApiKey)
-		+ Serialize::stringSize(_summaryModel);
+		+ Serialize::stringSize(_summaryModel)
+		+ sizeof(qint32);
+	for (const auto &rule : _linkRewrites) {
+		size += Serialize::stringSize(rule.sourceHost)
+			+ Serialize::stringSize(rule.targetHost);
+	}
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -68,6 +119,10 @@ QByteArray ForkSettings::serialize() const {
 			<< _summaryApiKey
 			<< _summaryModel
 			;
+		stream << qint32(_linkRewrites.size());
+		for (const auto &rule : _linkRewrites) {
+			stream << rule.sourceHost << rule.targetHost;
+		}
 	}
 	return result;
 }
@@ -107,6 +162,7 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	QString summaryApiBaseUrl = _summaryApiBaseUrl;
 	QString summaryApiKey = _summaryApiKey;
 	QString summaryModel = _summaryModel;
+	auto linkRewrites = _linkRewrites;
 
 	if (!stream.atEnd()) {
 		stream
@@ -163,6 +219,24 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> summaryModel;
 	}
+	if (!stream.atEnd()) {
+		qint32 count = 0;
+		stream >> count;
+		if (count < 0) {
+			stream.setStatus(QDataStream::ReadCorruptData);
+		} else {
+			linkRewrites.clear();
+			linkRewrites.reserve(count);
+			for (auto i = 0; i != count && !stream.atEnd(); ++i) {
+				auto rule = LinkRewriteRule();
+				stream >> rule.sourceHost >> rule.targetHost;
+				linkRewrites.push_back(std::move(rule));
+			}
+			if (linkRewrites.size() != count) {
+				stream.setStatus(QDataStream::ReadCorruptData);
+			}
+		}
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::ForkSettings::constructFromSerialized()"));
@@ -197,6 +271,7 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	_summaryApiBaseUrl = std::move(summaryApiBaseUrl);
 	_summaryApiKey = std::move(summaryApiKey);
 	_summaryModel = std::move(summaryModel);
+	_linkRewrites = NormalizeLinkRewrites(std::move(linkRewrites));
 }
 
 void ForkSettings::resetOnLastLogout() {
@@ -226,6 +301,7 @@ void ForkSettings::resetOnLastLogout() {
 	_summaryApiBaseUrl = QString();
 	_summaryApiKey = QString();
 	_summaryModel = QString();
+	_linkRewrites = DefaultLinkRewrites();
 }
 
 [[nodiscard]] bool ForkSettings::primaryUnmutedMessages() const {
@@ -297,6 +373,10 @@ void ForkSettings::setBotsPlatforms(QString newValue) {
 }
 void ForkSettings::setArchivedStoriesAreHidden(bool newValue) {
 	_archivedStoriesAreHidden = newValue;
+}
+
+void ForkSettings::setLinkRewrites(std::vector<LinkRewriteRule> newValue) {
+	_linkRewrites = NormalizeLinkRewrites(std::move(newValue));
 }
 
 } // namespace Core

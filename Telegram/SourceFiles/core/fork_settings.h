@@ -3,13 +3,32 @@ Author: 23rd.
 */
 #pragma once
 
+#include <QtCore/QByteArray>
+#include <QtCore/QString>
+
+#include <vector>
+
 namespace Core {
+
+struct LinkRewriteRule {
+	QString sourceHost;
+	QString targetHost;
+
+	friend inline auto operator<=>(
+		const LinkRewriteRule &,
+		const LinkRewriteRule &) = default;
+	friend inline bool operator==(
+		const LinkRewriteRule &,
+		const LinkRewriteRule &) = default;
+};
 
 class ForkSettings final {
 public:
 	ForkSettings();
 
 	[[nodiscard]] static bool PrimaryUnmutedMessages();
+	[[nodiscard]] static QString NormalizeLinkRewriteHost(QString value);
+	[[nodiscard]] static const std::vector<LinkRewriteRule> &DefaultLinkRewrites();
 
 	[[nodiscard]] QByteArray serialize() const;
 	void addFromSerialized(const QByteArray &serialized);
@@ -148,6 +167,10 @@ public:
 	void setSummaryModel(QString newValue) {
 		_summaryModel = std::move(newValue);
 	}
+	[[nodiscard]] const std::vector<LinkRewriteRule> &linkRewrites() const {
+		return _linkRewrites;
+	}
+	void setLinkRewrites(std::vector<LinkRewriteRule> newValue);
 
 private:
 	bool _squareUserpics = false;
@@ -177,6 +200,7 @@ private:
 	QString _summaryApiBaseUrl;
 	QString _summaryApiKey;
 	QString _summaryModel;
+	std::vector<LinkRewriteRule> _linkRewrites;
 
 };
 

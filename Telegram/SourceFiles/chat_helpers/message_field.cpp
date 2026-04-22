@@ -59,11 +59,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt/qt_common_adapters.h"
 
 #include <QtCore/QMimeData>
+#include <QtCore/QPointer>
 #include <QtCore/QStack>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QTextBlock>
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
+
+#include <algorithm>
+#include <optional>
 
 namespace {
 
@@ -77,9 +81,15 @@ constexpr auto kTypesDuration = 4 * crl::time(1000);
 constexpr auto kCodeLanguageLimit = 32;
 
 constexpr auto kLinkProtocols = {
-    "http://",
-    "https://",
-    "tonsite://"
+	"http://",
+	"https://",
+	"tonsite://"
+};
+
+struct ParsedLinkHost {
+	int start = 0;
+	int length = 0;
+	QString normalized;
 };
 
 // For mention / custom emoji tags save and validate selfId,
@@ -132,6 +142,394 @@ constexpr auto kLinkProtocols = {
 //	return protocolMatch.hasMatch()
 //		&& IsGoodProtocol(protocolMatch.captured(1));
 //}
+
+[[nodiscard]] bool LinkRewriteSupportedProtocol(QStringView protocol) {
+	return protocol.isEmpty()
+		|| (protocol.compare(u"http"_q, Qt::CaseInsensitive) == 0)
+		|| (protocol.compare(u"https"_q, Qt::CaseInsensitive) == 0);
+}
+
+[[nodiscard]] std::optional<ParsedLinkHost> ParseLinkHost(QStringView url) {
+	auto hostStart = 0;
+	if (const auto separator = url.indexOf(u"://"_q); separator > 0) {
+		if (!LinkRewriteSupportedProtocol(
+				base::StringViewMid(url, 0, separator))) {
+			return std::nullopt;
+		}
+		hostStart = separator + 3;
+	}
+	auto hostEnd = hostStart;
+	while (hostEnd < url.size()) {
+		switch (url[hostEnd].unicode()) {
+		case '/':
+		case ':':
+		case '?':
+		case '#':
+			goto parsed_host;
+		default:
+			++hostEnd;
+			break;
+		}
+	}
+parsed_host:
+	if (hostEnd <= hostStart) {
+		return std::nullopt;
+	}
+	const auto length = hostEnd - hostStart;
+	const auto normalized = Core::ForkSettings::NormalizeLinkRewriteHost(
+		base::StringViewMid(url, hostStart, length).toString());
+	return normalized.isEmpty()
+		? std::nullopt
+		: std::optional(ParsedLinkHost{ hostStart, length, normalized });
+}
+
+[[nodiscard]] QString RewriteMessageLink(QString url) {
+	if (url.isEmpty()) {
+		return url;
+	}
+	const auto parsed = ParseLinkHost(url);
+	if (!parsed) {
+		return url;
+	}
+	for (const auto &rule : Core::App().settings().fork().linkRewrites()) {
+		if (parsed->normalized == rule.sourceHost) {
+			url.replace(parsed->start, parsed->length, rule.targetHost);
+			break;
+		}
+	}
+	return url;
+}
+
+[[nodiscard]] std::vector<MessageLinkRange> ParseMessageLinksRanges(
+		const QString &text,
+		const TextWithTags::Tags &tags,
+		const std::vector<Ui::InputField::MarkdownTag> &markdownTags) {
+	const auto tagCanIntersectWithLink = [](const QString &tag) {
+		return (tag == Ui::InputField::kTagBold)
+			|| (tag == Ui::InputField::kTagItalic)
+			|| (tag == Ui::InputField::kTagUnderline)
+			|| (tag == Ui::InputField::kTagStrikeOut)
+			|| (tag == Ui::InputField::kTagSpoiler)
+			|| (tag == Ui::InputField::kTagBlockquote)
+			|| (tag == Ui::InputField::kTagBlockquoteCollapsed);
+	};
+
+	auto result = std::vector<MessageLinkRange>();
+
+	auto tag = tags.begin();
+	const auto tagsEnd = tags.end();
+	const auto processTag = [&] {
+		Expects(tag != tagsEnd);
+
+		if (Ui::InputField::IsValidMarkdownLink(tag->id)
+			&& !TextUtilities::IsMentionLink(tag->id)) {
+			result.push_back({ tag->offset, tag->length, tag->id });
+		}
+		++tag;
+	};
+	const auto processTagsBefore = [&](int offset) {
+		while (tag != tagsEnd
+			&& (tag->offset + tag->length <= offset
+				|| tagCanIntersectWithLink(tag->id))) {
+			processTag();
+		}
+	};
+	const auto hasTagsIntersection = [&](int till) {
+		if (tag == tagsEnd || tag->offset >= till) {
+			return false;
+		}
+		while (tag != tagsEnd && tag->offset < till) {
+			processTag();
+		}
+		return true;
+	};
+
+	auto markdownTag = markdownTags.begin();
+	const auto markdownTagsEnd = markdownTags.end();
+	const auto markdownTagsAllow = [&](int from, int length) {
+		while (markdownTag != markdownTagsEnd
+			&& (markdownTag->adjustedStart
+				+ markdownTag->adjustedLength <= from
+				|| !markdownTag->closed
+				|| tagCanIntersectWithLink(markdownTag->tag))) {
+			++markdownTag;
+		}
+		if (markdownTag == markdownTagsEnd
+			|| markdownTag->adjustedStart >= from + length) {
+			return true;
+		}
+		return (markdownTag->adjustedStart > from)
+			|| (markdownTag->adjustedStart
+				+ markdownTag->adjustedLength < from + length);
+	};
+
+	const auto len = text.size();
+	const auto start = text.unicode();
+	const auto end = start + len;
+	for (auto offset = 0, matchOffset = offset; offset < len;) {
+		auto match = qthelp::RegExpDomain().match(text, matchOffset);
+		if (!match.hasMatch()) {
+			break;
+		}
+
+		const auto domainOffset = match.capturedStart();
+		const auto protocol = match.captured(1).toLower();
+		const auto topDomain = match.captured(3).toLower();
+		const auto isProtocolValid = protocol.isEmpty()
+			|| TextUtilities::IsValidProtocol(protocol);
+		const auto isTopDomainValid = !protocol.isEmpty()
+			|| TextUtilities::IsValidTopDomain(topDomain);
+
+		if (protocol.isEmpty()
+			&& domainOffset > offset + 1
+			&& *(start + domainOffset - 1) == QChar('@')) {
+			const auto forMailName = text.mid(offset, domainOffset - offset - 1);
+			if (TextUtilities::RegExpMailNameAtEnd().match(
+					forMailName).hasMatch()) {
+				offset = matchOffset = match.capturedEnd();
+				continue;
+			}
+		}
+		if (!isProtocolValid || !isTopDomainValid) {
+			offset = matchOffset = match.capturedEnd();
+			continue;
+		}
+
+		auto parenth = QStack<const QChar*>();
+		const auto domainEnd = start + match.capturedEnd();
+		auto p = domainEnd;
+		for (; p < end; ++p) {
+			auto ch = QChar(*p);
+			if (IsLinkEnd(ch)) {
+				break;
+			} else if (IsAlmostLinkEnd(ch)) {
+				auto endTest = p + 1;
+				while (endTest < end && IsAlmostLinkEnd(*endTest)) {
+					++endTest;
+				}
+				if (endTest >= end || IsLinkEnd(*endTest)) {
+					break;
+				}
+				p = endTest;
+				ch = *p;
+			}
+			if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+				parenth.push(p);
+			} else if (ch == ')' || ch == ']' || ch == '}' || ch == '>') {
+				if (parenth.isEmpty()) {
+					break;
+				}
+				const auto q = parenth.pop();
+				const auto open = QChar(*q);
+				if ((ch == ')' && open != '(')
+					|| (ch == ']' && open != '[')
+					|| (ch == '}' && open != '{')
+					|| (ch == '>' && open != '<')) {
+					p = q;
+					break;
+				}
+			}
+		}
+		if (p > domainEnd
+			&& domainEnd->unicode() != '/'
+			&& domainEnd->unicode() != '?') {
+			matchOffset = domainEnd - start;
+			continue;
+		}
+		const auto range = MessageLinkRange{
+			int(domainOffset),
+			int(p - start - domainOffset),
+			QString(),
+		};
+		processTagsBefore(domainOffset);
+		if (!hasTagsIntersection(range.start + range.length)
+			&& markdownTagsAllow(range.start, range.length)) {
+			result.push_back(range);
+		}
+		offset = matchOffset = p - start;
+	}
+	processTagsBefore(Ui::kQFixedMax);
+	return result;
+}
+
+void AdjustTagsForReplacement(
+		TextWithTags::Tags &tags,
+		int start,
+		int length,
+		int replacementLength) {
+	const auto till = start + length;
+	const auto diff = replacementLength - length;
+	const auto mapStart = [&](int value) {
+		return (value <= start)
+			? value
+			: (value >= till)
+			? (value + diff)
+			: start;
+	};
+	const auto mapEnd = [&](int value) {
+		return (value <= start)
+			? value
+			: (value >= till)
+			? (value + diff)
+			: (start + replacementLength);
+	};
+	for (auto &tag : tags) {
+		const auto from = mapStart(tag.offset);
+		const auto to = mapEnd(tag.offset + tag.length);
+		tag.offset = from;
+		tag.length = std::max(to - from, 0);
+	}
+}
+
+[[nodiscard]] int AdjustCursorForReplacement(
+		int value,
+		int start,
+		int length,
+		int replacementLength) {
+	const auto till = start + length;
+	return (value <= start)
+		? value
+		: (value >= till)
+		? (value + replacementLength - length)
+		: (start + replacementLength);
+}
+
+[[nodiscard]] bool RewriteFieldText(
+		not_null<Ui::InputField*> field,
+		TextWithTags &textWithTags,
+		int &anchor,
+		int &position) {
+	const auto ranges = ParseMessageLinksRanges(
+		textWithTags.text,
+		textWithTags.tags,
+		field->getMarkdownTags());
+	auto changed = false;
+	for (auto i = ranges.rbegin(); i != ranges.rend(); ++i) {
+		const auto &range = *i;
+		if (!range.custom.isEmpty()) {
+			continue;
+		}
+		const auto link = base::StringViewMid(
+			textWithTags.text,
+			range.start,
+			range.length).toString();
+		const auto rewritten = RewriteMessageLink(link);
+		if (rewritten == link) {
+			continue;
+		}
+		changed = true;
+		textWithTags.text.replace(range.start, range.length, rewritten);
+		AdjustTagsForReplacement(
+			textWithTags.tags,
+			range.start,
+			range.length,
+			rewritten.size());
+		anchor = AdjustCursorForReplacement(
+			anchor,
+			range.start,
+			range.length,
+			rewritten.size());
+		position = AdjustCursorForReplacement(
+			position,
+			range.start,
+			range.length,
+			rewritten.size());
+	}
+	return changed;
+}
+
+void ApplyMessageLinkRewrites(not_null<Ui::InputField*> field) {
+	auto textWithTags = field->getTextWithTags();
+	auto cursor = field->textCursor();
+	auto anchor = cursor.anchor();
+	auto position = cursor.position();
+	const auto scrollTop = field->scrollTop().current();
+	if (!RewriteFieldText(field, textWithTags, anchor, position)) {
+		return;
+	}
+	field->setTextWithTags(
+		textWithTags,
+		Ui::InputField::HistoryAction::MergeEntry);
+	cursor = field->textCursor();
+	cursor.setPosition(anchor);
+	if (position != anchor) {
+		cursor.setPosition(position, QTextCursor::KeepAnchor);
+	}
+	field->setTextCursor(cursor);
+	field->scrollTo(scrollTop);
+}
+
+[[nodiscard]] bool ShouldRewriteAfterTypedText(QStringView text) {
+	return ranges::any_of(text, [](QChar ch) {
+		return IsLinkEnd(ch) || IsAlmostLinkEnd(ch);
+	});
+}
+
+class MessageLinksRewriter final : private QObject {
+public:
+	explicit MessageLinksRewriter(not_null<Ui::InputField*> field)
+	: QObject(field.get())
+	, _field(field) {
+		_textEdit = _field->rawTextEdit().get();
+		_textEdit->installEventFilter(this);
+		_field->changes(
+		) | rpl::on_next([=] {
+			if (_applyAfterChange) {
+				_applyAfterChange = false;
+				apply();
+			}
+		}, _lifetime);
+		_field->documentContentsChanges(
+		) | rpl::on_next([=](const Ui::InputField::DocumentChangeInfo &info) {
+			if (!_applying && info.added > 1) {
+				apply();
+			}
+		}, _lifetime);
+		_field->submits(
+		) | rpl::on_next([=](Qt::KeyboardModifiers) {
+			apply();
+		}, _lifetime);
+		_field->focusedChanges(
+		) | rpl::filter([=](bool focused) {
+			return !focused;
+		}) | rpl::on_next([=] {
+			apply();
+		}, _lifetime);
+	}
+
+private:
+	bool eventFilter(QObject *object, QEvent *event) override {
+		if (_textEdit && object == _textEdit) {
+			if (event->type() == QEvent::KeyPress) {
+				const auto key = static_cast<QKeyEvent*>(event);
+				if (key->matches(QKeySequence::Paste)
+					|| ShouldRewriteAfterTypedText(key->text())) {
+					_applyAfterChange = true;
+				}
+			} else if (event->type() == QEvent::Drop) {
+				_applyAfterChange = true;
+			}
+		}
+		return QObject::eventFilter(object, event);
+	}
+
+	void apply() {
+		if (_applying || !_textEdit) {
+			return;
+		}
+		_applying = true;
+		const auto guard = gsl::finally([&] {
+			_applying = false;
+		});
+		ApplyMessageLinkRewrites(_field);
+	}
+
+	const not_null<Ui::InputField*> _field;
+	QPointer<QTextEdit> _textEdit;
+	bool _applyAfterChange = false;
+	bool _applying = false;
+	rpl::lifetime _lifetime;
+};
 
 void EditLinkBox(
 		not_null<Ui::GenericBox*> box,
@@ -479,6 +877,9 @@ Fn<bool(
 				strong->commitMarkdownLinkEdit(selection, text, link);
 			}
 		};
+		const auto validate = [](QString url) {
+			return qthelp::validate_url(RewriteMessageLink(url));
+		};
 		show->showBox(Box(
 			EditLinkBox,
 			show,
@@ -486,7 +887,7 @@ Fn<bool(
 			link,
 			std::move(callback),
 			fieldStyle,
-			qthelp::validate_url));
+			validate));
 		return true;
 	};
 }
@@ -521,12 +922,14 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 	field->setMarkdownReplacesEnabled(rpl::single(Ui::MarkdownEnabledState{
 		Ui::MarkdownEnabled{ std::move(args.allowMarkdownTags) }
 	}));
+	field->setMimeDataHook(WrappedMessageFieldMimeHook(nullptr, field));
 	if (const auto &show = args.show) {
 		field->setEditLinkCallback(
 			DefaultEditLinkCallback(show, field, args.fieldStyle));
 		field->setEditLanguageCallback(DefaultEditLanguageCallback(show));
 		InitSpellchecker(show, field, args.fieldStyle != nullptr);
 	}
+	new MessageLinksRewriter(field);
 	const auto style = std::make_shared<Ui::ChatStyle>(
 		session->colorIndicesValue());
 	field->setPreCache([=] {
@@ -1016,149 +1419,15 @@ bool MessageLinksParser::eventFilter(QObject *object, QEvent *event) {
 void MessageLinksParser::parse() {
 	const auto &textWithTags = _field->getTextWithTags();
 	const auto &text = textWithTags.text;
-	const auto &tags = textWithTags.tags;
-	const auto &markdownTags = _field->getMarkdownTags();
 	if (_disabled || text.isEmpty()) {
 		_ranges = {};
 		_list = QStringList();
 		return;
 	}
-	const auto tagCanIntersectWithLink = [](const QString &tag) {
-		return (tag == Ui::InputField::kTagBold)
-			|| (tag == Ui::InputField::kTagItalic)
-			|| (tag == Ui::InputField::kTagUnderline)
-			|| (tag == Ui::InputField::kTagStrikeOut)
-			|| (tag == Ui::InputField::kTagSpoiler)
-			|| (tag == Ui::InputField::kTagBlockquote)
-			|| (tag == Ui::InputField::kTagBlockquoteCollapsed);
-	};
-
-	_ranges.clear();
-
-	auto tag = tags.begin();
-	const auto tagsEnd = tags.end();
-	const auto processTag = [&] {
-		Expects(tag != tagsEnd);
-
-		if (Ui::InputField::IsValidMarkdownLink(tag->id)
-			&& !TextUtilities::IsMentionLink(tag->id)) {
-			_ranges.push_back({ tag->offset, tag->length, tag->id });
-		}
-		++tag;
-	};
-	const auto processTagsBefore = [&](int offset) {
-		while (tag != tagsEnd
-			&& (tag->offset + tag->length <= offset
-				|| tagCanIntersectWithLink(tag->id))) {
-			processTag();
-		}
-	};
-	const auto hasTagsIntersection = [&](int till) {
-		if (tag == tagsEnd || tag->offset >= till) {
-			return false;
-		}
-		while (tag != tagsEnd && tag->offset < till) {
-			processTag();
-		}
-		return true;
-	};
-
-	auto markdownTag = markdownTags.begin();
-	const auto markdownTagsEnd = markdownTags.end();
-	const auto markdownTagsAllow = [&](int from, int length) {
-		while (markdownTag != markdownTagsEnd
-			&& (markdownTag->adjustedStart
-				+ markdownTag->adjustedLength <= from
-				|| !markdownTag->closed
-				|| tagCanIntersectWithLink(markdownTag->tag))) {
-			++markdownTag;
-		}
-		if (markdownTag == markdownTagsEnd
-			|| markdownTag->adjustedStart >= from + length) {
-			return true;
-		}
-		// Ignore http-links that are completely inside some tags.
-		// This will allow sending http://test.com/__test__/test correctly.
-		return (markdownTag->adjustedStart > from)
-			|| (markdownTag->adjustedStart
-				+ markdownTag->adjustedLength < from + length);
-	};
-
-	const auto len = text.size();
-	const QChar *start = text.unicode(), *end = start + text.size();
-	for (auto offset = 0, matchOffset = offset; offset < len;) {
-		auto m = qthelp::RegExpDomain().match(text, matchOffset);
-		if (!m.hasMatch()) break;
-
-		auto domainOffset = m.capturedStart();
-
-		auto protocol = m.captured(1).toLower();
-		auto topDomain = m.captured(3).toLower();
-		auto isProtocolValid = protocol.isEmpty() || TextUtilities::IsValidProtocol(protocol);
-		auto isTopDomainValid = !protocol.isEmpty() || TextUtilities::IsValidTopDomain(topDomain);
-
-		if (protocol.isEmpty() && domainOffset > offset + 1 && *(start + domainOffset - 1) == QChar('@')) {
-			auto forMailName = text.mid(offset, domainOffset - offset - 1);
-			auto mMailName = TextUtilities::RegExpMailNameAtEnd().match(forMailName);
-			if (mMailName.hasMatch()) {
-				offset = matchOffset = m.capturedEnd();
-				continue;
-			}
-		}
-		if (!isProtocolValid || !isTopDomainValid) {
-			offset = matchOffset = m.capturedEnd();
-			continue;
-		}
-
-		QStack<const QChar*> parenth;
-		const QChar *domainEnd = start + m.capturedEnd(), *p = domainEnd;
-		for (; p < end; ++p) {
-			QChar ch(*p);
-			if (IsLinkEnd(ch)) {
-				break; // link finished
-			} else if (IsAlmostLinkEnd(ch)) {
-				const QChar *endTest = p + 1;
-				while (endTest < end && IsAlmostLinkEnd(*endTest)) {
-					++endTest;
-				}
-				if (endTest >= end || IsLinkEnd(*endTest)) {
-					break; // link finished at p
-				}
-				p = endTest;
-				ch = *p;
-			}
-			if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
-				parenth.push(p);
-			} else if (ch == ')' || ch == ']' || ch == '}' || ch == '>') {
-				if (parenth.isEmpty()) break;
-				const QChar *q = parenth.pop(), open(*q);
-				if ((ch == ')' && open != '(') || (ch == ']' && open != '[') || (ch == '}' && open != '{') || (ch == '>' && open != '<')) {
-					p = q;
-					break;
-				}
-			}
-		}
-		if (p > domainEnd) { // check, that domain ended
-			if (domainEnd->unicode() != '/' && domainEnd->unicode() != '?') {
-				matchOffset = domainEnd - start;
-				continue;
-			}
-		}
-		const auto range = MessageLinkRange{
-			int(domainOffset),
-			static_cast<int>(p - start - domainOffset),
-			QString()
-		};
-		processTagsBefore(domainOffset);
-		if (!hasTagsIntersection(range.start + range.length)) {
-			if (markdownTagsAllow(range.start, range.length)) {
-				_ranges.push_back(range);
-			}
-		}
-		offset = matchOffset = p - start;
-	}
-	processTagsBefore(Ui::kQFixedMax);
-
+	_ranges = ParseMessageLinksRanges(
+		text,
+		textWithTags.tags,
+		_field->getMarkdownTags());
 	applyRanges(text);
 }
 
@@ -1607,6 +1876,19 @@ Ui::InputField::MimeDataHook WrappedMessageFieldMimeHook(
 			const auto text = QString::fromUtf8(
 				data->data(u"application/x-telegram-input-field"_q));
 			field->textCursor().insertText(text);
+			ApplyMessageLinkRewrites(field);
+			return true;
+		} else if (!data->hasUrls()
+			&& !data->hasImage()
+			&& !data->hasFormat(TextUtilities::TagsTextMimeType())
+			&& !data->hasFormat(TextUtilities::TagsMimeType())
+			&& data->hasText()) {
+			if (action == Ui::InputField::MimeAction::Check) {
+				return true;
+			}
+			field->textCursor().insertText(
+				data->text().replace(u"\r\n"_q, u"\n"_q));
+			ApplyMessageLinkRewrites(field);
 			return true;
 		}
 		return originalHook ? originalHook(data, action) : false;

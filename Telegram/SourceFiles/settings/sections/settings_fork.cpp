@@ -68,6 +68,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 
 #include <QtCore/QUrl>
+#include <QtCore/QPointer>
+
+#include <algorithm>
 
 namespace Settings {
 
@@ -385,6 +388,183 @@ void TextValueBox::prepare() {
 	setDimensions(st::boxWidth, content->height());
 }
 
+class LinkRewriteRulesBox final : public Ui::BoxContent, public base::has_weak_ptr {
+public:
+	LinkRewriteRulesBox(QWidget*, Fn<void()> saved);
+
+	void setInnerFocus() override;
+
+protected:
+	void prepare() override;
+
+private:
+	struct RowState {
+		QPointer<Ui::InputField> source;
+		QPointer<Ui::InputField> target;
+	};
+
+	[[nodiscard]] std::vector<Core::LinkRewriteRule> collectRules() const;
+	void rebuildRows(std::vector<Core::LinkRewriteRule> rules, int focusIndex);
+	void save();
+
+	QPointer<Ui::VerticalLayout> _rowsWrap;
+	std::vector<RowState> _rows;
+	Fn<void()> _saved;
+	Fn<void()> _setInnerFocus;
+};
+
+LinkRewriteRulesBox::LinkRewriteRulesBox(QWidget*, Fn<void()> saved)
+: _saved(std::move(saved)) {
+}
+
+void LinkRewriteRulesBox::setInnerFocus() {
+	if (_setInnerFocus) {
+		_setInnerFocus();
+	}
+}
+
+std::vector<Core::LinkRewriteRule> LinkRewriteRulesBox::collectRules() const {
+	auto result = std::vector<Core::LinkRewriteRule>();
+	result.reserve(_rows.size());
+	for (const auto &[source, target] : _rows) {
+		result.push_back({
+			source ? source->getLastText() : QString(),
+			target ? target->getLastText() : QString(),
+		});
+	}
+	return result;
+}
+
+void LinkRewriteRulesBox::rebuildRows(
+		std::vector<Core::LinkRewriteRule> rules,
+		int focusIndex) {
+	_rows.clear();
+	while (_rowsWrap->count()) {
+		delete _rowsWrap->widgetAt(0);
+	}
+	for (auto i = 0, count = int(rules.size()); i != count; ++i) {
+		const auto wrap = _rowsWrap->add(object_ptr<Ui::VerticalLayout>(
+			_rowsWrap));
+		const auto source = wrap->add(
+			object_ptr<Ui::InputField>(
+				wrap,
+				st::defaultInputField,
+				rpl::single(u"Original host"_q),
+				rules[i].sourceHost),
+			st::markdownLinkFieldPadding);
+		const auto target = wrap->add(
+			object_ptr<Ui::InputField>(
+				wrap,
+				st::defaultInputField,
+				rpl::single(u"Replacement host"_q),
+				rules[i].targetHost),
+			st::markdownLinkFieldPadding);
+		AddButtonWithIcon(
+			wrap,
+			rpl::single(u"Remove rule"_q),
+			st::settingsButtonNoIcon,
+			{ &st::menuIconDeleteAttention })->setClickedCallback([=] {
+			auto current = collectRules();
+			if (i >= 0 && i < int(current.size())) {
+				current.erase(begin(current) + i);
+			}
+			rebuildRows(std::move(current), std::max(0, i - 1));
+		});
+		Ui::AddSkip(wrap);
+		Ui::AddDivider(wrap);
+		Ui::AddSkip(wrap);
+		_rows.push_back({ source, target });
+	}
+	if (!_rows.empty()) {
+		_setInnerFocus = [=] {
+			const auto index = std::clamp(focusIndex, 0, int(_rows.size()) - 1);
+			if (const auto input = _rows[index].source.data()) {
+				input->setFocusFast();
+			}
+		};
+	} else {
+		_setInnerFocus = nullptr;
+	}
+	_rowsWrap->resizeToWidth(width());
+}
+
+void LinkRewriteRulesBox::save() {
+	auto raw = collectRules();
+	auto rules = std::vector<Core::LinkRewriteRule>();
+	rules.reserve(raw.size());
+	auto sourceErrors = std::vector<int>();
+	auto targetErrors = std::vector<int>();
+	for (auto i = 0, count = int(raw.size()); i != count; ++i) {
+		auto source = Core::ForkSettings::NormalizeLinkRewriteHost(
+			raw[i].sourceHost);
+		auto target = Core::ForkSettings::NormalizeLinkRewriteHost(
+			raw[i].targetHost);
+		const auto emptySource = raw[i].sourceHost.trimmed().isEmpty();
+		const auto emptyTarget = raw[i].targetHost.trimmed().isEmpty();
+		if (emptySource && emptyTarget) {
+			continue;
+		}
+		if (source.isEmpty()) {
+			sourceErrors.push_back(i);
+		}
+		if (target.isEmpty()) {
+			targetErrors.push_back(i);
+		}
+		if (!source.isEmpty() && !target.isEmpty()) {
+			rules.push_back({ std::move(source), std::move(target) });
+		}
+	}
+	if (!sourceErrors.empty() || !targetErrors.empty()) {
+		for (const auto index : sourceErrors) {
+			if (index >= 0 && index < int(_rows.size())) {
+				if (const auto input = _rows[index].source.data()) {
+					input->showError();
+				}
+			}
+		}
+		for (const auto index : targetErrors) {
+			if (index >= 0 && index < int(_rows.size())) {
+				if (const auto input = _rows[index].target.data()) {
+					input->showError();
+				}
+			}
+		}
+		return;
+	}
+	Core::App().settings().fork().setLinkRewrites(std::move(rules));
+	Core::App().saveSettings();
+	if (_saved) {
+		_saved();
+	}
+	closeBox();
+}
+
+void LinkRewriteRulesBox::prepare() {
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	_rowsWrap = content->add(object_ptr<Ui::VerticalLayout>(content));
+	rebuildRows(Core::App().settings().fork().linkRewrites(), 0);
+	AddButtonWithIcon(
+		content,
+		rpl::single(u"Add rule"_q),
+		st::settingsButtonNoIcon,
+		{ &st::settingsIconAdd, IconType::Round, &st::windowBgActive }
+	)->setClickedCallback([=] {
+		auto rules = collectRules();
+		rules.push_back({});
+		rebuildRows(std::move(rules), _rows.size());
+		setInnerFocus();
+	});
+
+	setTitle(u"Link rewrites"_q);
+	addButton(tr::lng_settings_save(), [=] {
+		save();
+	});
+	addButton(tr::lng_cancel(), [=] {
+		closeBox();
+	});
+	setDimensionsToContent(st::boxWideWidth, content);
+}
+
 [[nodiscard]] bool InvalidSummaryApiBaseUrl(QString value) {
 	const auto validated = qthelp::validate_url(value.trimmed());
 	if (validated.isEmpty()) {
@@ -416,6 +596,16 @@ void TextValueBox::prepare() {
 	return value.isEmpty() ? u"Not set"_q : value;
 }
 
+[[nodiscard]] QString LinkRewriteRulesLabel() {
+	const auto count = Core::App().settings().fork().linkRewrites().size();
+	if (!count) {
+		return u"Disabled"_q;
+	}
+	return (count == 1)
+		? u"1 rule"_q
+		: u"%1 rules"_q.arg(count);
+}
+
 //////
 
 using namespace Builder;
@@ -432,6 +622,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 		rpl::variable<QString> baseUrl = SummaryApiBaseUrlLabel();
 		rpl::variable<QString> apiKey = SummaryApiKeyLabel();
 		rpl::variable<QString> model = SummaryModelLabel();
+		rpl::variable<QString> linkRewrites = LinkRewriteRulesLabel();
 	};
 	const auto summaryLabels = std::make_shared<SummaryLabels>();
 
@@ -866,6 +1057,34 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 			u"model"_q,
 			u"llm"_q,
 			u"openai"_q,
+		},
+	});
+
+	builder.addSkip();
+	builder.addDivider();
+	builder.addSkip();
+
+	builder.addSubsectionTitle(rpl::single(u"Link rewrites"_q));
+	builder.addButton({
+		.id = u"fork/link_rewrites/manage"_q,
+		.title = rpl::single(u"Manage rewrite rules"_q),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconAddress },
+		.label = summaryLabels->linkRewrites.value(),
+		.onClick = [=] {
+			controller->show(Box<LinkRewriteRulesBox>([=] {
+				summaryLabels->linkRewrites = LinkRewriteRulesLabel();
+			}));
+		},
+		.keywords = {
+			u"link"_q,
+			u"rewrite"_q,
+			u"rule"_q,
+			u"domain"_q,
+			u"host"_q,
+			u"fixupx"_q,
+			u"instagram"_q,
+			u"x.com"_q,
 		},
 	});
 
