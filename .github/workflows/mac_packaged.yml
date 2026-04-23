@@ -1,6 +1,7 @@
 name: MacOS Packaged.
 
 on:
+  workflow_dispatch:
   push:
     paths-ignore:
       - 'docs/**'
