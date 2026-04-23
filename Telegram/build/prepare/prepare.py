@@ -1608,7 +1608,6 @@ mac:
         find "../../patches/qt6_highsierra/$QT_MAJOR_MINOR" -type f -print0 | sort -z | xargs -0 git apply -v
     fi
     find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
-    cd ..
     for file in qtimageformats/dependencies.yaml qtsvg/dependencies.yaml; do
         if [ -f "$file" ]; then
             sed -i.bak 's/tqtc-//' "$file"
