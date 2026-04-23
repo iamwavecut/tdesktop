@@ -517,7 +517,7 @@ UnreadSummaries::PreparedTranscript UnreadSummaries::BuildTranscript(
 
 	auto lines = QStringList();
 	lines.reserve(int(textItems.size()));
-	for (const auto item : textItems) {
+	for (const auto &item : textItems) {
 		lines.push_back(u"%1, %2: %3"_q
 			.arg(langDateTime(base::unixtime::parse(item->date())))
 			.arg(AuthorName(item))

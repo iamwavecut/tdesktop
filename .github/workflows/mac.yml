@@ -124,7 +124,12 @@ jobs:
         run: |
           cd $REPO_NAME/out/Debug
           mkdir artifact
-          mv Telegram.app artifact/
+          APP_BUNDLE="$(find . -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "No app bundle found in out/Debug."
+            exit 1
+          fi
+          mv "$APP_BUNDLE" artifact/
           mv Updater artifact/
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
