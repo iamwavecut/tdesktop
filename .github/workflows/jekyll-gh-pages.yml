@@ -24,6 +24,7 @@ concurrency:
 jobs:
   # Build job
   build:
+    if: github.repository == 'forkgram/tdesktop'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
