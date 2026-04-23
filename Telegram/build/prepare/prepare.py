@@ -475,8 +475,8 @@ win:
     msys64.exe
     del msys64.exe
 
-    bash -lc "printf '%s\\n' 'Server = https://repo.msys2.org/msys/$arch/' > /etc/pacman.d/mirrorlist.msys"
-    bash -lc "printf '%s\\n' 'Server = https://repo.msys2.org/mingw/$repo/' > /etc/pacman.d/mirrorlist.mingw"
+    bash -lc "printf 'Server = https://repo.msys2.org/msys/\\044arch/\\n' > /etc/pacman.d/mirrorlist.msys"
+    bash -lc "printf 'Server = https://repo.msys2.org/mingw/\\044repo/\\n' > /etc/pacman.d/mirrorlist.mingw"
 
     bash -lc "pacman-key --init && pacman-key --populate"
     bash -lc "pacman -Syu --noconfirm" || bash -lc "pacman -Syu --noconfirm" || bash -lc "pacman -Syu --noconfirm"

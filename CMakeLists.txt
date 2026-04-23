@@ -8,26 +8,43 @@ cmake_minimum_required(VERSION 3.25...3.31)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-# Apply qt6.11 patches to submodules at configure time.
 file(GLOB _submodule_patches "${CMAKE_SOURCE_DIR}/patches/*.patch")
 foreach(_patch ${_submodule_patches})
     get_filename_component(_patch_name ${_patch} NAME)
-    # Extract target submodule directory from patch filename (prefix before first '_').
     string(REGEX MATCH "^([a-z]+)" _submodule ${_patch_name})
-    if (IS_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}")
+    if (NOT IS_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}")
+        continue()
+    endif()
+
+    execute_process(
+        COMMAND git apply --check ${_patch}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
+        RESULT_VARIABLE _check_result
+        OUTPUT_VARIABLE _check_output
+        ERROR_VARIABLE _check_error
+    )
+    if (_check_result EQUAL 0)
         execute_process(
-            COMMAND git apply --check ${_patch}
+            COMMAND git apply ${_patch}
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
-            RESULT_VARIABLE _check_result
-            OUTPUT_QUIET ERROR_QUIET
+            COMMAND_ERROR_IS_FATAL ANY
         )
-        if (_check_result EQUAL 0)
-            execute_process(
-                COMMAND git apply ${_patch}
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
-            )
-            message(STATUS "Applied patch: ${_patch_name}")
-        endif()
+        message(STATUS "Applied patch: ${_patch_name}")
+        continue()
+    endif()
+
+    execute_process(
+        COMMAND git apply --reverse --check ${_patch}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
+        RESULT_VARIABLE _reverse_check_result
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if (_reverse_check_result EQUAL 0)
+        message(STATUS "Patch already applied: ${_patch_name}")
+    else()
+        message(FATAL_ERROR
+            "Failed to apply patch: ${_patch_name}\n"
+            "${_check_output}${_check_error}")
     endif()
 endforeach()
 
