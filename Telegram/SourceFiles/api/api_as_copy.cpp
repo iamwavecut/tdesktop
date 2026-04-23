@@ -180,7 +180,7 @@ void GuardedSendExistingAlbumFromItem(
 void SendExistingMediaFromItem(
 		not_null<HistoryItem*> item,
 		Api::AsCopy::ToSend &&toSend) {
-	for (const auto peer : toSend.peers) {
+	for (const auto &peer : toSend.peers) {
 		const auto history = peer->owner().history(peer);
 		auto message = MessageToSend(SendAction{ history });
 		if (!item->media()) {
