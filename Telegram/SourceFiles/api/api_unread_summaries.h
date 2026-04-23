@@ -88,6 +88,7 @@ private:
 		QString text;
 		TimeId rangeFromDate = 0;
 		TimeId rangeTillDate = 0;
+		int includedMessages = 0;
 
 		[[nodiscard]] bool empty() const {
 			return text.isEmpty();

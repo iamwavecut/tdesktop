@@ -7898,6 +7898,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_summarize_header_about" = "Click to see original text";
 "lng_fork_unread_summary_title" = "Unread summary";
 "lng_fork_unread_summary_title_range" = "Unread summary: {from} - {to}";
+"lng_fork_unread_summary_title_count#one" = "Unread summary ({count} message)";
+"lng_fork_unread_summary_title_count#other" = "Unread summary ({count} messages)";
+"lng_fork_unread_summary_title_range_count#one" = "Unread summary ({count} message): {from} - {to}";
+"lng_fork_unread_summary_title_range_count#other" = "Unread summary ({count} messages): {from} - {to}";
 
 "lng_calendar" = "Calendar";
 

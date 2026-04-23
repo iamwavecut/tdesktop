@@ -147,14 +147,14 @@ void JumpDownButton::setLoading(bool loading) {
 		return;
 	}
 	_loadingActive = loading;
-	if (loading && !_loading) {
+	if (loading) {
 		_loading = std::make_unique<InfiniteRadialAnimation>(
 			[=] { loadingAnimationCallback(); },
 			st::defaultInfiniteRadialAnimation);
 	}
 	setEnabled(!loading);
 	if (loading) {
-		_loading->start();
+		_loading->start(st::defaultInfiniteRadialAnimation.sineDuration);
 		update();
 	} else if (_loading) {
 		_loading->stopWithFade();

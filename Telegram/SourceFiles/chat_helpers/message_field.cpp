@@ -1417,9 +1417,16 @@ bool MessageLinksParser::eventFilter(QObject *object, QEvent *event) {
 }
 
 void MessageLinksParser::parse() {
+	if (_disabled) {
+		_ranges = {};
+		_list = QStringList();
+		return;
+	}
+	ApplyMessageLinkRewrites(_field);
+
 	const auto &textWithTags = _field->getTextWithTags();
 	const auto &text = textWithTags.text;
-	if (_disabled || text.isEmpty()) {
+	if (text.isEmpty()) {
 		_ranges = {};
 		_list = QStringList();
 		return;

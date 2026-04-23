@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "lang/lang_keys.h"
+#include "ui/text/text_utilities.h"
 #include "main/main_session.h"
 #include "ui/toast/toast.h"
 #include "window/window_controller.h"
@@ -212,7 +213,26 @@ constexpr auto kErrorToastDuration = 8 * crl::time(1000);
 	Unexpected("Failure in FailureTitle.");
 }
 
-[[nodiscard]] QString SummaryTitle(TimeId fromDate, TimeId tillDate) {
+[[nodiscard]] QString SummaryTitle(
+		TimeId fromDate,
+		TimeId tillDate,
+		int includedMessages) {
+	if (includedMessages > 0) {
+		if (!fromDate || !tillDate) {
+			return tr::lng_fork_unread_summary_title_count(
+				tr::now,
+				lt_count,
+				includedMessages);
+		}
+		return tr::lng_fork_unread_summary_title_range_count(
+			tr::now,
+			lt_count,
+			includedMessages,
+			lt_from,
+			langDateTime(base::unixtime::parse(fromDate)),
+			lt_to,
+			langDateTime(base::unixtime::parse(tillDate)));
+	}
 	if (!fromDate || !tillDate) {
 		return tr::lng_fork_unread_summary_title(tr::now);
 	}
@@ -227,11 +247,12 @@ constexpr auto kErrorToastDuration = 8 * crl::time(1000);
 [[nodiscard]] TextWithEntities ComposeSummaryText(
 		QString summary,
 		TimeId fromDate,
-		TimeId tillDate) {
+		TimeId tillDate,
+		int includedMessages) {
 	summary = summary.trimmed();
 
 	auto result = TextWithEntities();
-	const auto title = SummaryTitle(fromDate, tillDate);
+	const auto title = SummaryTitle(fromDate, tillDate, includedMessages);
 	result.text = title;
 	result.entities.push_back(EntityInText(
 		EntityType::Bold,
@@ -239,7 +260,11 @@ constexpr auto kErrorToastDuration = 8 * crl::time(1000);
 		title.size()));
 	if (!summary.isEmpty()) {
 		result.append(u"\n\n"_q);
-		result.append(summary);
+		auto body = Ui::Text::RichLangValue(summary);
+		TextUtilities::ParseEntities(
+			body,
+			TextParseLinks | TextParseMultiline);
+		result.append(std::move(body));
 	}
 	return result;
 }
@@ -488,6 +513,7 @@ UnreadSummaries::PreparedTranscript UnreadSummaries::BuildTranscript(
 	}
 	result.rangeFromDate = rangeItems.front()->date();
 	result.rangeTillDate = rangeItems.back()->date();
+	result.includedMessages = int(textItems.size());
 
 	auto lines = QStringList();
 	lines.reserve(int(textItems.size()));
@@ -534,6 +560,7 @@ void UnreadSummaries::startNetworkRequest(
 	const auto token = current.requestToken;
 	const auto rangeFromDate = transcript.rangeFromDate;
 	const auto rangeTillDate = transcript.rangeTillDate;
+	const auto includedMessages = transcript.includedMessages;
 	current.reply = _network->post(request, body);
 	QObject::connect(current.reply, &QNetworkReply::finished, [=] {
 		const auto found = lookup(key);
@@ -589,7 +616,8 @@ void UnreadSummaries::startNetworkRequest(
 		const auto formatted = ComposeSummaryText(
 			content,
 			rangeFromDate,
-			rangeTillDate);
+			rangeTillDate,
+			includedMessages);
 		if (const auto history = resolveHistory(key)) {
 			if (state.entry.shownItemId) {
 				if (const auto item = history->owner().message(
