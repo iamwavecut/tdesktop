@@ -31,7 +31,7 @@ Result RecognizeText(const QImage &image) {
 	}
 
 	@autoreleasepool {
-		CGImageRef cgImage = Q2CGImage(image);
+		auto cgImage = image.toCGImage();
 		if (!cgImage) {
 			return result;
 		}

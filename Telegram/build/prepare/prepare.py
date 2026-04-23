@@ -1008,8 +1008,9 @@ mac:
 """)
 
 stage('libjxl', """
-    git clone -b v0.11.2 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    git clone -b v0.11.2 https://github.com/libjxl/libjxl.git
     cd libjxl
+    git submodule update --init --recursive --depth=1 --jobs=4 || git submodule update --init --recursive --depth=1 --jobs=4 || git submodule update --init --recursive --depth=1 --jobs=4
 """ + setVar("cmake_defines", """
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
@@ -1608,7 +1609,11 @@ mac:
     fi
     find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
     cd ..
-    sed -i.bak 's/tqtc-//' {qtimageformats,qtsvg}/dependencies.yaml
+    for file in qtimageformats/dependencies.yaml qtsvg/dependencies.yaml; do
+        if [ -f "$file" ]; then
+            sed -i.bak 's/tqtc-//' "$file"
+        fi
+    done
 
     CONFIGURATIONS=-debug
 release:

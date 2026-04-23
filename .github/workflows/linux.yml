@@ -129,13 +129,26 @@ jobs:
             cd DesktopPrivate
             echo "#pragma once" > alpha_private.h
             echo "#pragma once" > packer_private.h
-            echo '${{ secrets.ALPHA_PRIVATE }}' >> alpha_private.h
-            echo '${{ secrets.PACKER_PRIVATE }}' >> packer_private.h
+            if [ -n "${{ secrets.ALPHA_PRIVATE }}" ]; then
+              echo '${{ secrets.ALPHA_PRIVATE }}' >> alpha_private.h
+            else
+              echo 'const char *AlphaPrivateKey = "";' >> alpha_private.h
+            fi
+            if [ -n "${{ secrets.PACKER_PRIVATE }}" ]; then
+              echo '${{ secrets.PACKER_PRIVATE }}' >> packer_private.h
+            else
+              echo 'const char *PrivateKey = "";' >> packer_private.h
+              echo 'const char *PrivateBetaKey = "";' >> packer_private.h
+            fi
             cd ..
           fi
 
-          wget ${{ secrets.PACK_FILE }} -O p.7z
-          7za x p.7z -p${{ secrets.PACK_FILE_PASSWORD }}
+          if [ -n "${{ secrets.PACK_FILE }}" ]; then
+            wget "${{ secrets.PACK_FILE }}" -O p.7z
+            7za x p.7z -p"${{ secrets.PACK_FILE_PASSWORD }}"
+          else
+            echo "PACK_FILE is empty, skip private pack bundle."
+          fi
 
       - name: Free up some disk space.
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
@@ -169,6 +182,11 @@ jobs:
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
+          API_DEFINE="-D TDESKTOP_API_TEST=ON"
+          if [ -n "${{ secrets.API_ID }}" ] && [ -n "${{ secrets.API_HASH }}" ]; then
+            API_DEFINE="-D TDESKTOP_API_ID=${{ secrets.API_ID }} -D TDESKTOP_API_HASH=${{ secrets.API_HASH }}"
+          fi
+
           DEFINE=""
           if [ -n "${{ matrix.defines }}" ]; then
             DEFINE="-D ${{ matrix.defines }}=ON"
@@ -184,8 +202,7 @@ jobs:
           -v $PWD/../DesktopPrivate:/usr/src/DesktopPrivate \
           $IMAGE_TAG \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          $API_DEFINE \
           -D DESKTOP_APP_SPECIAL_TARGET=linux \
           $DEFINE
 
@@ -210,7 +227,7 @@ jobs:
         run: tar -cJvf Forkgram.tar.xz -C out/MinSizeRel Forkgram Updater
 
       - name: Pack updater files.
-        if: (github.event_name == 'release') || (github.event_name == 'workflow_dispatch') || (github.event_name == 'repository_dispatch')
+        if: (github.event_name == 'release') || (github.event_name == 'repository_dispatch')
         run: |
           verPacker=$(awk '$1 == "AppVersion" { print $2 }' Telegram/build/version)
           cd out/MinSizeRel
@@ -232,7 +249,7 @@ jobs:
           echo "VER_PACKER=$verPacker" >> $GITHUB_ENV
 
       - name: Upload packed updater to Telegram channel.
-        if: (github.event_name == 'release') || (github.event_name == 'workflow_dispatch') || (github.event_name == 'repository_dispatch')
+        if: (github.event_name == 'release') || (github.event_name == 'repository_dispatch')
         env:
           UPDATER_UPLOAD_BASE64: ${{ secrets.UPDATER_UPLOAD_BASE64 }}
           UPDATER_UPLOAD_BASE64_PART1: ${{ secrets.UPDATER_UPLOAD_BASE64_PART1 }}
