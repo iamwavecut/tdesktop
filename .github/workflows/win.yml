@@ -115,6 +115,7 @@ jobs:
 
       - name: ThirdParty cache.
         id: cache-third-party
+        continue-on-error: true
         uses: actions/cache@v5
         with:
           path: ${{ env.TBUILD }}\ThirdParty
@@ -123,6 +124,7 @@ jobs:
 
       - name: Libraries cache.
         id: cache-libs
+        continue-on-error: true
         uses: actions/cache@v5
         with:
           path: |
@@ -136,6 +138,7 @@ jobs:
 
       - name: Qt cache.
         id: cache-qt
+        continue-on-error: true
         uses: actions/cache@v5
         with:
           path: |
