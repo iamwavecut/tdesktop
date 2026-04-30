@@ -92,6 +92,21 @@ Window::Window()
 	_controlsTop.value()))
 #endif // !Q_OS_MAC
 {
+#ifdef Q_OS_WIN
+	// RpWindow on Windows goes through Platform::WindowHelper, which
+	// owns its own TitleWidget that normally replaces the native frame.
+	// The call window adds SeparateTitleControls on top of the body, so
+	// without stripping the helper's title bar we end up rendering two
+	// stacked title rows. Opt out of the helper's internal Frameless
+	// flag management (on pre-Win8 it ties Qt::FramelessWindowHint to
+	// the TitleWidget's visibility: hidden title => native frame, which
+	// is the opposite of what we want), then hide the helper title and
+	// drive FramelessWindowHint explicitly - final state: frameless,
+	// helper title hidden, separate controls as the only title bar.
+	window()->setManualFramelessOwned(true);
+	window()->setNativeFrame(true);
+	window()->setWindowFlag(Qt::FramelessWindowHint);
+#endif // Q_OS_WIN
 	_layerBg->setStyleOverrides(&st::groupCallBox, &st::groupCallLayerBox);
 	_layerBg->setHideByBackgroundClick(true);
 }

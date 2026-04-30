@@ -146,6 +146,8 @@ envForThirdPartyKey = hashlib.sha1(envForThirdPartyKeyString.encode('utf-8')).he
 modifiedEnv = os.environ.copy()
 for key in environment:
     modifiedEnv[key] = environment[key]
+if win and 'NoDefaultCurrentDirectoryInExePath' in modifiedEnv:
+    del modifiedEnv['NoDefaultCurrentDirectoryInExePath']
 
 modifiedEnv['PATH'] = environment['PATH_PREFIX'] + modifiedEnv['PATH']
 
@@ -312,8 +314,9 @@ def run(commands):
         if os.path.exists("command.bat"):
             os.remove("command.bat")
         with open("command.bat", 'w') as file:
-            file.write('@echo OFF\r\n' + winFailOnEach(commands))
-        result = subprocess.run("command.bat", shell=True, env=modifiedEnv).returncode == 0
+            file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\n' + winFailOnEach(commands))
+        batPath = os.path.abspath("command.bat")
+        result = subprocess.run(batPath, shell=True, env=modifiedEnv).returncode == 0
         if result and os.path.exists("command.bat"):
             os.remove("command.bat")
         return result
@@ -453,7 +456,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 4519c85c924b9da81f29d4aac045886f896ee479
+    git checkout 8a1df43db9362e0a25a9e1ea4959fc28b856a845
 """)
 
 if 'win7' in options:
@@ -1535,6 +1538,7 @@ win:
         -confirm-license ^
         -static ^
         -static-runtime ^
+        -trace no ^
         -opengl es2 -no-angle ^
         -I "%ANGLE_DIR%\\include" ^
         -D "KHRONOS_STATIC=" ^
@@ -1598,7 +1602,7 @@ else: # qt > '6'
     stage('qt_' + qt, """
     git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT
-    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
+    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg qtshadertools
 depends:patches/qtbase_""" + qt + """/*.patch
 mac:
     QT_MAJOR_MINOR=$(echo $QT | grep -oE '^[0-9]+\\.[0-9]+')
@@ -1641,6 +1645,8 @@ mac:
     cmake --install .
 win:
     cd qtbase
+    echo Applying Qt6 Windows 7 compatibility patches...
+    xcopy /E /Y "%LIBS_DIR%\\qt6windows7\\qtbase\\src" src\\
     for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do git apply %%i -v
     cd ..
 
@@ -1662,6 +1668,7 @@ win:
         -confirm-license ^
         -static ^
         -static-runtime ^
+        -trace no ^
         -feature-c++20 ^
         -openssl linked ^
         -system-webp ^

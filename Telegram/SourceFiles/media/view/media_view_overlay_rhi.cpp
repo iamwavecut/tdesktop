@@ -1668,10 +1668,16 @@ void OverlayWidget::RendererRhi::paintControl(
 		const auto overAlpha = float(overOpacity * kOverBackgroundOpacity);
 		const auto &overTex = _controlsTextures[kControlsCount];
 		const auto overGeometry = transformRect(over);
+		// QRect::right()/bottom() return x+width-1 / y+height-1
+		// (inclusive), which is one texel short of the atlas sub-rect.
+		// Sampling only up to that coordinate stretches the (width-1)
+		// texels across the full destination quad, making the rendered
+		// icon / hover circle look one pixel too wide and clips its
+		// right/bottom antialiased edge.
 		const auto tl = overTex.left() / atlasW;
-		const auto tr = overTex.right() / atlasW;
+		const auto tr = (overTex.x() + overTex.width()) / atlasW;
 		const auto tt = overTex.top() / atlasH;
-		const auto tb = overTex.bottom() / atlasH;
+		const auto tb = (overTex.y() + overTex.height()) / atlasH;
 		const float overCoords[] = {
 			overGeometry.left(), overGeometry.bottom(), tl, tt,
 			overGeometry.right(), overGeometry.bottom(), tr, tt,
@@ -1689,9 +1695,9 @@ void OverlayWidget::RendererRhi::paintControl(
 	const auto &iconTex = _controlsTextures[meta.index];
 	const auto iconGeometry = transformRect(inner);
 	const auto tl = iconTex.left() / atlasW;
-	const auto tr = iconTex.right() / atlasW;
+	const auto tr = (iconTex.x() + iconTex.width()) / atlasW;
 	const auto tt = iconTex.top() / atlasH;
-	const auto tb = iconTex.bottom() / atlasH;
+	const auto tb = (iconTex.y() + iconTex.height()) / atlasH;
 	const float iconCoords[] = {
 		iconGeometry.left(), iconGeometry.bottom(), tl, tt,
 		iconGeometry.right(), iconGeometry.bottom(), tr, tt,

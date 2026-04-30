@@ -80,7 +80,8 @@ void Domain::startWithSingleAccount(
 		account->start(nullptr);
 	} else {
 		generateLocalKey();
-		account->start(account->prepareToStart(_localKey));
+		auto config = account->prepareToStart(_localKey);
+		account->start(std::move(config));
 	}
 	_owner->accountAddedInStorage(Main::Domain::AccountWithIndex{
 		.account = std::move(account)

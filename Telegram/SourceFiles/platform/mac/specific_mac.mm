@@ -108,6 +108,12 @@ int psFixPrevious() {
 
 namespace Platform {
 
+void SetupQtRhi() {
+	qputenv("QT_WIDGETS_RHI", "1");
+	qputenv("QT_WIDGETS_RHI_BACKEND",
+		Platform::MetalSupported() ? "metal" : "opengl");
+}
+
 void start() {
 	objc_start();
 }

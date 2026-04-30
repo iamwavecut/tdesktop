@@ -3155,8 +3155,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							? tr::lng_context_copy_selected_items(tr::now)
 							: tr::lng_context_copy_selected(tr::now)),
 						[=] { copySelectedText(); }),
-					&st::menuIconCopy,
-					&st::menuIconCopy);
+					nullptr,
+					nullptr);
 				addDepersonalized(owned.get());
 				_menu->addAction(std::move(owned));
 			}
@@ -3305,8 +3305,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							? tr::lng_context_copy_selected_items(tr::now)
 							: tr::lng_context_copy_selected(tr::now)),
 						[=] { copySelectedText(); }),
-					&st::menuIconCopy,
-					&st::menuIconCopy);
+					nullptr,
+					nullptr);
 				addDepersonalized(owned.get());
 				_menu->addAction(std::move(owned));
 			}
@@ -3337,7 +3337,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 								showStickerPackInfo(document);
 							}, &st::menuIconStickers);
 						} else {
-							Api::AddAddToStickerSetAction(
+							Api::AddAddToOwnedSetAction(
 								Ui::Menu::CreateAddActionCallback(_menu),
 								_controller->uiShow(),
 								document);
@@ -3849,21 +3849,43 @@ TextForMimeData HistoryInner::getSelectedText(bool depersonalized) const {
 	auto fullSize = 0;
 	auto texts = base::flat_map<Data::MessagePosition, Part>();
 	auto personMap = base::flat_map<not_null<PeerData*>, int>();
+	auto hiddenPersonMap = base::flat_map<QString, int>();
 	auto personCounter = 1;
+
+	const auto personNumber = [&](not_null<HistoryItem*> item) {
+		if (const auto sender = item->originalSender()) {
+			const auto it = personMap.find(sender);
+			if (it != personMap.end()) {
+				return it->second;
+			}
+			const auto number = personCounter++;
+			personMap.emplace(sender, number);
+			return number;
+		} else if (const auto hidden = item->originalHiddenSenderInfo()) {
+			const auto it = hiddenPersonMap.find(hidden->name);
+			if (it != hiddenPersonMap.end()) {
+				return it->second;
+			}
+			const auto number = personCounter++;
+			hiddenPersonMap.emplace(hidden->name, number);
+			return number;
+		}
+		const auto author = item->author();
+		const auto it = personMap.find(author);
+		if (it != personMap.end()) {
+			return it->second;
+		}
+		const auto number = personCounter++;
+		personMap.emplace(author, number);
+		return number;
+	};
 
 	const auto wrapItem = [&](
 			not_null<HistoryItem*> item,
 			TextForMimeData &&unwrapped) {
 		auto name = QString();
 		if (depersonalized) {
-			const auto author = item->author();
-			const auto it = personMap.find(author);
-			if (it != personMap.end()) {
-				name = QString("Person %1").arg(it->second);
-			} else {
-				name = QString("Person %1").arg(personCounter);
-				personMap.emplace(author, personCounter++);
-			}
+			name = QString("Person %1").arg(personNumber(item));
 		} else {
 			name = item->author()->name();
 		}
@@ -5773,16 +5795,13 @@ void HistoryInner::addDepersonalized(not_null<Ui::RpWidget*> parent) {
 		parent,
 		st::botDownloadCancel);
 	button->setIconOverride(&st::menuIconStealth, &st::menuIconStealth);
-	parent->sizeValue() | rpl::on_next([=](QSize s) {
-		button->move(
-			s.width() - button->width() * 1.5,
-			(s.height() - button->height()) / 2);
-	}, button->lifetime());
+	button->move(style::ConvertScale(17), style::ConvertScale(7));
 	button->show();
 
 	button->setClickedCallback([=] {
 		if (!showCopyRestrictionForSelected()) {
 			TextUtilities::SetClipboardText(getSelectedText(true));
+			clearSelected();
 			if (_menu) {
 				_menu->hide();
 			}

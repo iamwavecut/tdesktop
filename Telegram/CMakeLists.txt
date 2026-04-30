@@ -1534,6 +1534,8 @@ PRIVATE
     platform/linux/webauthn_linux.cpp
     platform/mac/file_utilities_mac.mm
     platform/mac/file_utilities_mac.h
+    platform/mac/global_menu_mac.h
+    platform/mac/global_menu_mac.mm
     platform/mac/launcher_mac.mm
     platform/mac/launcher_mac.h
     platform/mac/integration_mac.mm
@@ -1596,6 +1598,8 @@ PRIVATE
     platform/win/windows_dlls.h
     platform/win/windows_autostart_task.cpp
     platform/win/windows_autostart_task.h
+    platform/win/windows_gpu_info.cpp
+    platform/win/windows_gpu_info.h
     platform/win/windows_toast_activator.cpp
     platform/win/windows_toast_activator.h
     platform/platform_file_utilities.h
@@ -2034,9 +2038,7 @@ if (WIN32)
         if (EXISTS "${_yy_thunks_candidate}")
             message(STATUS "YY-Thunks: enabling Windows 7/8 compatibility via ${_yy_thunks_candidate}")
             set(yy_thunks_obj "${_yy_thunks_candidate}")
-            set_source_files_properties("${yy_thunks_obj}" PROPERTIES EXTERNAL_OBJECT true)
-            target_sources(Telegram PRIVATE ${yy_thunks_obj})
-            target_link_options(Telegram PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:WINDOWS,6.01)
+            target_link_options(Telegram PRIVATE "${yy_thunks_obj}" /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:WINDOWS,6.01)
         else()
             message(FATAL_ERROR "DESKTOP_APP_WIN7_COMPAT=ON but YY-Thunks object not found at ${_yy_thunks_candidate}. Run Telegram/build/prepare/prepare.py with the 'win7' option to fetch it.")
         endif()
@@ -2226,7 +2228,7 @@ if (MSVC)
         /DELAYLOAD:ws2_32.dll
         /DELAYLOAD:user32.dll
         /DELAYLOAD:gdi32.dll
-        /DELAYLOAD:advapi32.dll
+
         /DELAYLOAD:avrt.dll
         /DELAYLOAD:shell32.dll
         /DELAYLOAD:ole32.dll
@@ -2248,28 +2250,59 @@ if (MSVC)
     if (QT_VERSION GREATER 6)
         if (NOT build_winarm)
             target_link_options(Telegram PRIVATE
-                /DELAYLOAD:API-MS-Win-EventLog-Legacy-l1-1-0.dll
+#                 /DELAYLOAD:API-MS-Win-EventLog-Legacy-l1-1-0.dll
             )
         endif()
 
         target_link_options(Telegram
         PRIVATE
-            /DELAYLOAD:API-MS-Win-Core-Console-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-1.dll
-            /DELAYLOAD:API-MS-Win-Core-File-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-LibraryLoader-l1-2-0.dll
-            /DELAYLOAD:API-MS-Win-Core-Localization-l1-2-0.dll
-            /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-1.dll
-            /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-0.dll # Synchronization.lib
-            /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Console-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-1.dll
+#             /DELAYLOAD:API-MS-Win-Core-File-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Localization-l1-2-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-1.dll
+#             /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-0.dll # Synchronization.lib
+#             /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-1-0.dll
             # /DELAYLOAD:API-MS-Win-Core-Timezone-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-WinRT-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-WinRT-Error-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Core-WinRT-String-l1-1-0.dll
-            /DELAYLOAD:API-MS-Win-Security-CryptoAPI-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Security-CryptoAPI-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-File-l2-1-2.dll
+#             /DELAYLOAD:API-MS-Win-Core-File-l2-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-File-l1-2-2.dll
+#             /DELAYLOAD:API-MS-Win-Core-Registry-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Registry-l2-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Console-l1-2-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Console-l2-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Heap-l2-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-String-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-String-Obsolete-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-MM-Time-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-1.dll
+#             /DELAYLOAD:API-MS-Win-Core-PSApi-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-ProcessTopology-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-ProcessTopology-Obsolete-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-COM-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-NTUser-SysParams-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Shcore-Obsolete-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Kernel32-Legacy-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Kernel32-Legacy-l1-1-1.dll
+#             /DELAYLOAD:API-MS-Win-Core-Toolhelp-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-ThreadPool-l1-2-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-ThreadPool-Legacy-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-SystemTopology-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Timezone-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Localization-Obsolete-l1-2-0.dll
+#             /DELAYLOAD:API-MS-Win-Eventing-Provider-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-WoW64-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Fibers-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Fibers-l1-1-1.dll
+#             /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-1.dll
+#             /DELAYLOAD:API-MS-Win-Core-Synch-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-Synch-Ansi-l1-1-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-2-0.dll
+#             /DELAYLOAD:API-MS-Win-Core-ProcessEnvironment-l1-1-0.dll
             # /DELAYLOAD:API-MS-Win-Shcore-Scaling-l1-1-1.dll # We shadowed GetDpiForMonitor
             /DELAYLOAD:authz.dll # Authz.lib
             /DELAYLOAD:comdlg32.dll
@@ -2320,7 +2353,7 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
             target_link_options(Updater
             PRIVATE
                 /DELAYLOAD:user32.dll
-                /DELAYLOAD:advapi32.dll
+
                 /DELAYLOAD:shell32.dll
                 /DELAYLOAD:ole32.dll
                 /DELAYLOAD:shlwapi.dll
@@ -2329,8 +2362,7 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
             target_link_options(Updater PRIVATE -municode)
         endif()
         if (yy_thunks_obj)
-            target_sources(Updater PRIVATE ${yy_thunks_obj})
-            target_link_options(Updater PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:WINDOWS,6.01)
+            target_link_options(Updater PRIVATE "${yy_thunks_obj}" /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:WINDOWS,6.01)
         endif()
     elseif (APPLE)
         add_custom_command(TARGET Updater
@@ -2365,8 +2397,7 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         endif()
 
         if (WIN32 AND yy_thunks_obj)
-            target_sources(Packer PRIVATE ${yy_thunks_obj})
-            target_link_options(Packer PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:CONSOLE,6.01)
+            target_link_options(Packer PRIVATE "${yy_thunks_obj}" /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:CONSOLE,6.01)
         endif()
 
         set_target_properties(Packer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
@@ -2414,3 +2445,4 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services" RENAME "io.github.forkgram.tdesktop.service")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "io.github.forkgram.tdesktop.metainfo.xml")
 endif()
+

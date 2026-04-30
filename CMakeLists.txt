@@ -8,43 +8,43 @@ cmake_minimum_required(VERSION 3.25...3.31)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-file(GLOB _submodule_patches "${CMAKE_SOURCE_DIR}/patches/*.patch")
+# Apply local patches to submodules at configure time.
+# Filename prefix (split on '_') is matched against submodule directories,
+# trying the longest prefix first, both at the repo root and under Telegram/.
+file(GLOB _submodule_patches CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/patches/*.patch")
 foreach(_patch ${_submodule_patches})
+    get_filename_component(_patch_stem ${_patch} NAME_WE)
     get_filename_component(_patch_name ${_patch} NAME)
-    string(REGEX MATCH "^([a-z]+)" _submodule ${_patch_name})
-    if (NOT IS_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}")
-        continue()
-    endif()
-
-    execute_process(
-        COMMAND git apply --check ${_patch}
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
-        RESULT_VARIABLE _check_result
-        OUTPUT_VARIABLE _check_output
-        ERROR_VARIABLE _check_error
-    )
-    if (_check_result EQUAL 0)
-        execute_process(
-            COMMAND git apply ${_patch}
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        message(STATUS "Applied patch: ${_patch_name}")
-        continue()
-    endif()
-
-    execute_process(
-        COMMAND git apply --reverse --check ${_patch}
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule}"
-        RESULT_VARIABLE _reverse_check_result
-        OUTPUT_QUIET ERROR_QUIET
-    )
-    if (_reverse_check_result EQUAL 0)
-        message(STATUS "Patch already applied: ${_patch_name}")
-    else()
-        message(FATAL_ERROR
-            "Failed to apply patch: ${_patch_name}\n"
-            "${_check_output}${_check_error}")
+    string(REPLACE "_" ";" _parts ${_patch_stem})
+    list(LENGTH _parts _n)
+    set(_applied FALSE)
+    while(_n GREATER 0 AND NOT _applied)
+        list(SUBLIST _parts 0 ${_n} _head)
+        string(REPLACE ";" "_" _candidate "${_head}")
+        foreach(_root "" "Telegram/")
+            set(_dir "${CMAKE_SOURCE_DIR}/${_root}${_candidate}")
+            if (IS_DIRECTORY ${_dir})
+                execute_process(
+                    COMMAND git apply --check ${_patch}
+                    WORKING_DIRECTORY ${_dir}
+                    RESULT_VARIABLE _check_result
+                    OUTPUT_QUIET ERROR_QUIET
+                )
+                if (_check_result EQUAL 0)
+                    execute_process(
+                        COMMAND git apply ${_patch}
+                        WORKING_DIRECTORY ${_dir}
+                    )
+                    message(STATUS "Applied patch ${_patch_name} in ${_root}${_candidate}")
+                    set(_applied TRUE)
+                    break()
+                endif()
+            endif()
+        endforeach()
+        math(EXPR _n "${_n} - 1")
+    endwhile()
+    if (NOT _applied)
+        message(STATUS "Skipped patch ${_patch_name} (no matching submodule or already applied)")
     endif()
 endforeach()
 

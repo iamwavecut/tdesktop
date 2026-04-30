@@ -35,6 +35,7 @@ enum class SystemSettingsType {
 	Audio,
 };
 
+void SetupQtRhi();
 void SetApplicationIcon(const QIcon &icon);
 [[nodiscard]] QString SingleInstanceLocalServerName(const QString &hash);
 [[nodiscard]] PermissionStatus GetPermissionStatus(PermissionType type);

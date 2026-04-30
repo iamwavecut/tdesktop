@@ -298,7 +298,7 @@ void AddDocumentActions(
 			&st::menuIconStickers);
 	}
 	if (document->sticker() && !document->sticker()->set) {
-		Api::AddAddToStickerSetAction(
+		Api::AddAddToOwnedSetAction(
 			Ui::Menu::CreateAddActionCallback(menu),
 			controller->uiShow(),
 			document);

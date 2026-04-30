@@ -324,6 +324,7 @@ void Application::run() {
 	}, _lifetime);
 
 	DEBUG_LOG(("Application Info: inited..."));
+	LOG(("Qt version: %1 (compiled with %2)").arg(QString::fromLatin1(qVersion()), QString::fromLatin1(QT_VERSION_STR)));
 
 	DEBUG_LOG(("Application Info: starting app..."));
 
@@ -379,8 +380,6 @@ void Application::run() {
 		}
 	}, _lifetime);
 
-	DEBUG_LOG(("Application Info: window created..."));
-
 	startDomain();
 	style::SetSquareUserpics(settings().fork().squareUserpics());
 
@@ -390,7 +389,6 @@ void Application::run() {
 
 	startMediaView();
 
-	DEBUG_LOG(("Application Info: showing."));
 	_lastActivePrimaryWindow->finishFirstShow();
 
 	if (!_lastActivePrimaryWindow->locked() && cStartToSettings()) {
@@ -481,7 +479,6 @@ void Application::showOpenGLCrashNotification() {
 void Application::startDomain() {
 	const auto state = _domain->start(QByteArray());
 	if (state != Storage::StartResult::IncorrectPasscodeLegacy) {
-		// In case of non-legacy passcoded app all global settings are ready.
 		startSettingsAndBackground();
 	}
 	if (state != Storage::StartResult::Success) {

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/win/windows_app_user_model_id.h"
 #include "platform/win/windows_dlls.h"
 #include "platform/win/windows_autostart_task.h"
+#include "platform/win/windows_gpu_info.h"
 #include "base/platform/base_platform_info.h"
 #include "base/platform/win/base_windows_co_task_mem.h"
 #include "base/platform/win/base_windows_shlobj_h.h"
@@ -59,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <locale.h>
 
 #include <ShellScalingApi.h>
+#include <VersionHelpers.h>
 
 #ifndef DCX_USESTYLE
 #define DCX_USESTYLE 0x00010000
@@ -365,6 +367,180 @@ void start() {
 }
 
 } // namespace ThirdParty
+
+namespace {
+
+// Creates a dummy window, picks a non-generic pixel format, spins up a
+// legacy WGL context, reads GL_VERSION and returns the major version
+// number (0 on any failure — no ICD, generic MS software GL, context
+// creation failure, etc). QRhi requires at least GL 2.1, so probing
+// the actual runtime version is the only way to avoid a qFatal when
+// Qt later tries to bring up its QRhi OpenGL backend on a driver
+// that only supplies GL 1.x. opengl32.dll is loaded dynamically to
+// avoid introducing an import dep and keep the failure modes local.
+[[nodiscard]] int ProbeOpenGLMajorCore() {
+	const auto opengl = LoadLibraryW(L"opengl32.dll");
+	if (!opengl) {
+		return 0;
+	}
+	const auto loadGuard = gsl::finally([&] { FreeLibrary(opengl); });
+
+	using PFN_wglCreateContext = HGLRC (WINAPI *)(HDC);
+	using PFN_wglMakeCurrent = BOOL (WINAPI *)(HDC, HGLRC);
+	using PFN_wglDeleteContext = BOOL (WINAPI *)(HGLRC);
+	using PFN_glGetString = const unsigned char *(WINAPI *)(unsigned int);
+	const auto wglCreate = reinterpret_cast<PFN_wglCreateContext>(
+		GetProcAddress(opengl, "wglCreateContext"));
+	const auto wglMake = reinterpret_cast<PFN_wglMakeCurrent>(
+		GetProcAddress(opengl, "wglMakeCurrent"));
+	const auto wglDelete = reinterpret_cast<PFN_wglDeleteContext>(
+		GetProcAddress(opengl, "wglDeleteContext"));
+	const auto glGetStringFn = reinterpret_cast<PFN_glGetString>(
+		GetProcAddress(opengl, "glGetString"));
+	if (!wglCreate || !wglMake || !wglDelete || !glGetStringFn) {
+		return 0;
+	}
+
+	const auto hwnd = CreateWindowExW(
+		0, L"STATIC", L"",
+		WS_POPUP, 0, 0, 1, 1,
+		nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+	if (!hwnd) {
+		return 0;
+	}
+	const auto hwndGuard = gsl::finally([&] { DestroyWindow(hwnd); });
+
+	const auto dc = GetDC(hwnd);
+	if (!dc) {
+		return 0;
+	}
+	const auto dcGuard = gsl::finally([&] { ReleaseDC(hwnd, dc); });
+
+	PIXELFORMATDESCRIPTOR pfd{};
+	pfd.nSize = sizeof(pfd);
+	pfd.nVersion = 1;
+	pfd.dwFlags = PFD_DRAW_TO_WINDOW
+		| PFD_SUPPORT_OPENGL
+		| PFD_DOUBLEBUFFER;
+	pfd.iPixelType = PFD_TYPE_RGBA;
+	pfd.cColorBits = 32;
+	pfd.cDepthBits = 24;
+	pfd.iLayerType = PFD_MAIN_PLANE;
+	const auto pf = ChoosePixelFormat(dc, &pfd);
+	if (pf <= 0) {
+		return 0;
+	}
+	PIXELFORMATDESCRIPTOR chosen{};
+	chosen.nSize = sizeof(chosen);
+	if (!DescribePixelFormat(dc, pf, sizeof(chosen), &chosen)
+		|| (chosen.dwFlags & PFD_GENERIC_FORMAT)) {
+		return 0;
+	}
+	if (!SetPixelFormat(dc, pf, &pfd)) {
+		return 0;
+	}
+
+	const auto rc = wglCreate(dc);
+	if (!rc) {
+		return 0;
+	}
+	const auto rcGuard = gsl::finally([&] { wglDelete(rc); });
+	if (!wglMake(dc, rc)) {
+		return 0;
+	}
+	const auto currentGuard = gsl::finally([&] {
+		wglMake(nullptr, nullptr);
+	});
+
+	constexpr auto kGlVersion = 0x1F02u;
+	const auto versionStr = reinterpret_cast<const char*>(
+		glGetStringFn(kGlVersion));
+	if (!versionStr) {
+		return 0;
+	}
+	auto major = 0;
+	for (auto p = versionStr; *p >= '0' && *p <= '9'; ++p) {
+		major = major * 10 + (*p - '0');
+	}
+	LOG(("OpenGL probe: '%1' parsed major=%2"
+		).arg(QString::fromUtf8(versionStr)
+		).arg(major));
+	return major;
+}
+
+// SEH trampoline. Must be a separate function with no C++ objects
+// of non-trivial destructor type — MSVC forbids mixing __try with
+// C++ unwind in the same function body. See the wrapper below for
+// the rationale on why we need the SEH guard at all.
+static int ProbeOpenGLMajorSeh(int *crashed) {
+	int r = 0;
+	__try {
+		r = ProbeOpenGLMajorCore();
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+		*crashed = 1;
+	}
+	return r;
+}
+
+// Buggy GPU ICDs can crash inside wglCreateContext / wglMakeCurrent /
+// glGetString. Breakpad's handler is not yet installed this early in
+// startup (see CrashReports::StartCatching call order), so an
+// uncaught SEH here would terminate the process with a 0-byte WER
+// stub. Trap it and return 0 — treated as "no usable OpenGL" and the
+// launcher falls back to Qt raster, matching pre-QRhi Win7 behavior.
+[[nodiscard]] int ProbeOpenGLMajor() {
+	auto crashed = 0;
+	const auto result = ProbeOpenGLMajorSeh(&crashed);
+	if (crashed) {
+		LOG(("OpenGL probe: SEH caught in driver, falling back to raster."));
+	}
+	return result;
+}
+
+} // namespace
+
+void SetupQtRhi() {
+	const auto gpu = EnumeratePrimaryGpu();
+	if (gpu.valid()) {
+		LOG(("GPU: vendor=0x%1 device=0x%2 '%3'"
+			).arg(gpu.vendorId, 4, 16, QChar('0')
+			).arg(gpu.deviceId, 4, 16, QChar('0')
+			).arg(gpu.deviceString));
+	}
+	if (IsWindows8OrGreater()) {
+		if (GpuBlacklistedForFeature(gpu, QLatin1String("disable_d3d11"))) {
+			// Blacklisted D3D11 — leave main window on Qt raster.
+			// Matches official Qt5 Telegram behavior for this GPU;
+			// media overlay uses its own QRhi surface and decides
+			// independently.
+			return;
+		}
+		qputenv("QT_WIDGETS_RHI", "1");
+		qputenv("QT_WIDGETS_RHI_BACKEND", "d3d11");
+		// Disable GDI redirection surface for D3D11-backed windows.
+		// Required for DirectComposition to properly handle alpha
+		// on translucent frameless top-level windows (Media Viewer
+		// overlay, tooltips, popups).
+		qputenv("QT_QPA_DISABLE_REDIRECTION_SURFACE", "1");
+		return;
+	}
+	if (GpuBlacklistedForFeature(gpu, QLatin1String("disable_desktopgl"))) {
+		// Blacklisted desktop OpenGL — main window on raster. This
+		// matches official Qt5 Telegram: its Ui::GL legacy path reads
+		// the same blacklist and skips GL for these GPUs too.
+		return;
+	}
+	if (ProbeOpenGLMajor() >= 2) {
+		// Win7 with a real OpenGL 2+ driver: QRhi over OpenGL.
+		// D3D11's createOrResizeWin7 legacy swapchain path in Qt 6.10
+		// does not present content reliably, OpenGL works where the
+		// vendor ICD supplies at least GL 2.1.
+		qputenv("QT_WIDGETS_RHI", "1");
+		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
+	}
+	// Win7 without usable OpenGL 2+ — leave QRhi disabled so Qt
+	// falls back to raster.
+}
 
 void start() {
 	const auto supported = base::WinRT::Supported();

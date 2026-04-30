@@ -1,0 +1,76 @@
+diff --git a/base/network_reachability.cpp b/base/network_reachability.cpp
+index 041343e..0fd454a 100644
+--- a/base/network_reachability.cpp
++++ b/base/network_reachability.cpp
+@@ -6,6 +6,7 @@
+ //
+ #include "base/network_reachability.h"
+ 
++#include "base/platform/base_platform_info.h"
+ #include "base/platform/base_platform_network_reachability.h"
+ #include "base/qt_signal_producer.h"
+ 
+@@ -53,8 +54,10 @@ NetworkReachability::NetworkReachability()
+ 			_private->available = available;
+ 		}, _private->lifetime);
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+-	} else if (QNetworkInformation::load(
+-		QNetworkInformation::Feature::Reachability)) {
++	} else if (::Platform::IsWindows8OrGreater()
++		&& QNetworkInformation::load(
++			QNetworkInformation::Feature::Reachability)
++		&& QNetworkInformation::instance()) {
+ 		_private->available = QNetworkInformation::instance()->reachability()
+ 			== QNetworkInformation::Reachability::Online;
+ 		base::qt_signal_producer(
+diff --git a/base/platform/win/base_windows_winrt.cpp b/base/platform/win/base_windows_winrt.cpp
+index 076a853..9e8bb95 100644
+--- a/base/platform/win/base_windows_winrt.cpp
++++ b/base/platform/win/base_windows_winrt.cpp
+@@ -193,11 +193,25 @@ int32_t __stdcall WINRT_IMPL_RoGetAgileReference(uint32_t options, winrt::guid c
+ }
+ 
+ int32_t __stdcall WINRT_IMPL_SetThreadpoolTimerEx(winrt::impl::ptp_timer timer, void *time, uint32_t period, uint32_t window) noexcept {
+-	return P::SetThreadpoolTimerEx(timer, time, period, window);
++	if (P::SetThreadpoolTimerEx) {
++		return P::SetThreadpoolTimerEx(timer, time, period, window);
++	}
++	// Win7 fallback: use SetThreadpoolTimer (without Ex)
++	if (P::SetThreadpoolTimer) {
++		P::SetThreadpoolTimer(timer, time, period, window);
++	}
++	return 0;
+ }
+ 
+ int32_t __stdcall WINRT_IMPL_SetThreadpoolWaitEx(winrt::impl::ptp_wait wait, void *handle, void *timeout, void *reserved) noexcept {
+-	return P::SetThreadpoolWaitEx(wait, handle, timeout, reserved);
++	if (P::SetThreadpoolWaitEx) {
++		return P::SetThreadpoolWaitEx(wait, handle, timeout, reserved);
++	}
++	// Win7 fallback: use SetThreadpoolWait (without Ex)
++	if (P::SetThreadpoolWait) {
++		P::SetThreadpoolWait(wait, handle, timeout);
++	}
++	return 0;
+ }
+ 
+ int32_t __stdcall WINRT_IMPL_RoOriginateLanguageException(int32_t error, void* message, void* exception) noexcept {
+diff --git a/base/platform/win/base_windows_wrl.cpp b/base/platform/win/base_windows_wrl.cpp
+index 38e08c0..636ff0f 100644
+--- a/base/platform/win/base_windows_wrl.cpp
++++ b/base/platform/win/base_windows_wrl.cpp
+@@ -101,8 +101,6 @@ bool SupportsWRL() {
+ 
+ } // namespace base::Platform
+ 
+-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+-
+ namespace P = base::Platform;
+ 
+ extern "C" {
+@@ -234,5 +232,3 @@ RoOriginateError(
+ }
+ 
+ } // extern "C"
+-
+-#endif // Qt < 6.0.0
