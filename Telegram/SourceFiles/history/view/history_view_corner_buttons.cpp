@@ -28,6 +28,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 
+namespace {
+
+constexpr auto kUnreadSummaryButtonThreshold = 50;
+
+} // namespace
+
 namespace HistoryView {
 
 CornerButtons::CornerButtons(
@@ -351,7 +357,9 @@ void CornerButtons::updateJumpDownVisibility(std::optional<int> counter) {
 	updateVisibility(
 		Type::SummarizeDown,
 		_delegate->cornerButtonsHas(Type::SummarizeDown)
-			&& (summarizeActive || summarizeLoading || _unreadCount > 20)
+			&& (summarizeActive
+				|| summarizeLoading
+				|| _unreadCount >= kUnreadSummaryButtonThreshold)
 			&& (shown ? *shown : _down.shown));
 }
 
@@ -375,6 +383,22 @@ void CornerButtons::updatePositions() {
 	const auto unreadReactionsShown = shown(_reactions);
 	const auto unreadPollVotesShown = shown(_pollVotes);
 	const auto skip = st::historyUnreadThingsSkip;
+	const auto downShift = anim::interpolate(
+		0,
+		_down.widget->height() + skip,
+		historyDownShown);
+	const auto summarizeDownShift = anim::interpolate(
+		0,
+		_summarizeDown.widget->height() + skip,
+		historySummarizeDownShown);
+	const auto mentionsShift = anim::interpolate(
+		0,
+		_mentions.widget->height() + skip,
+		unreadMentionsShown);
+	const auto reactionsShift = anim::interpolate(
+		0,
+		_reactions.widget->height() + skip,
+		unreadReactionsShown);
 	{
 		const auto top = anim::interpolate(
 			0,
@@ -385,25 +409,24 @@ void CornerButtons::updatePositions() {
 			_parent->height() - top);
 	}
 	{
-		const auto top = anim::interpolate(
-			0,
-			_summarizeDown.widget->height() + st::historyToDownPosition.y(),
+		const auto right = anim::interpolate(
+			-_summarizeDown.widget->width(),
+			st::historyToDownPosition.x(),
 			historySummarizeDownShown);
+		const auto top = _parent->height()
+			- _summarizeDown.widget->height()
+			- st::historyToDownPosition.y()
+			- downShift;
 		_summarizeDown.widget->moveToRight(
-			st::historyToDownPosition.x()
-				+ _down.widget->width()
-				+ skip,
-			_parent->height() - top);
+			right,
+			top);
 	}
 	{
 		const auto right = anim::interpolate(
 			-_mentions.widget->width(),
 			st::historyToDownPosition.x(),
 			unreadMentionsShown);
-		const auto shift = anim::interpolate(
-			0,
-			_down.widget->height() + skip,
-			historyDownShown);
+		const auto shift = downShift + summarizeDownShift;
 		const auto top = _parent->height()
 			- _mentions.widget->height()
 			- st::historyToDownPosition.y()
@@ -415,14 +438,7 @@ void CornerButtons::updatePositions() {
 			-_reactions.widget->width(),
 			st::historyToDownPosition.x(),
 			unreadReactionsShown);
-		const auto shift = anim::interpolate(
-			0,
-			_down.widget->height() + skip,
-			historyDownShown
-		) + anim::interpolate(
-			0,
-			_mentions.widget->height() + skip,
-			unreadMentionsShown);
+		const auto shift = downShift + summarizeDownShift + mentionsShift;
 		const auto top = _parent->height()
 			- _reactions.widget->height()
 			- st::historyToDownPosition.y()
@@ -434,18 +450,10 @@ void CornerButtons::updatePositions() {
 			-_pollVotes.widget->width(),
 			st::historyToDownPosition.x(),
 			unreadPollVotesShown);
-		const auto shift = anim::interpolate(
-			0,
-			_down.widget->height() + skip,
-			historyDownShown
-		) + anim::interpolate(
-			0,
-			_mentions.widget->height() + skip,
-			unreadMentionsShown
-		) + anim::interpolate(
-			0,
-			_reactions.widget->height() + skip,
-			unreadReactionsShown);
+		const auto shift = downShift
+			+ summarizeDownShift
+			+ mentionsShift
+			+ reactionsShift;
 		const auto top = _parent->height()
 			- _pollVotes.widget->height()
 			- st::historyToDownPosition.y()
