@@ -5,22 +5,23 @@ on:
     types: [published]
   workflow_dispatch:
   push:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/snap.yml'
-      - '!.github/scripts/publish_release_asset.sh'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.bat'
-      - 'Telegram/Telegram.plist'
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+      - '!changelog.txt'
+      - '!LEGAL'
+      - '!LICENSE'
+      - '!.github/**'
+      - '.github/workflows/snap.yml'
+      - '.github/scripts/publish_release_asset.sh'
+      - '!Telegram/Resources/uwp/**'
+      - '!Telegram/Resources/winrc/**'
+      - '!Telegram/SourceFiles/platform/win/**'
+      - '!Telegram/SourceFiles/platform/mac/**'
+      - '!Telegram/Telegram/**'
+      - '!Telegram/configure.bat'
+      - '!Telegram/Telegram.plist'
 
 permissions:
   contents: write
