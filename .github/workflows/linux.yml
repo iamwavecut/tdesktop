@@ -7,6 +7,8 @@ on:
   repository_dispatch:
     types: ["Restart linux workflow."]
   push:
+    branches:
+      - '**'
     paths:
       - '**'
       - '!docs/**'
@@ -19,6 +21,7 @@ on:
       - '.github/scripts/publish_release_asset.sh'
       - '!snap/**'
       - '!Telegram/build/**'
+      - 'Telegram/build/version'
       - 'Telegram/build/docker/centos_env/**'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
@@ -40,6 +43,7 @@ on:
       - '.github/scripts/publish_release_asset.sh'
       - '!snap/**'
       - '!Telegram/build/**'
+      - 'Telegram/build/version'
       - 'Telegram/build/docker/centos_env/**'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
@@ -61,6 +65,7 @@ jobs:
   linux:
     name: Rocky Linux 8
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'release' || !endsWith(github.event.release.tag_name, '-dev') }}
 
     strategy:
       matrix:

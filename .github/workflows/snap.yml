@@ -5,6 +5,8 @@ on:
     types: [published]
   workflow_dispatch:
   push:
+    branches:
+      - '**'
     paths:
       - '**'
       - '!docs/**'
@@ -34,6 +36,7 @@ jobs:
   snap:
     name: Build and publish snap
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'release' || !endsWith(github.event.release.tag_name, '-dev') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

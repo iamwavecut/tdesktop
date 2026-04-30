@@ -3,6 +3,8 @@ name: MacOS Packaged.
 on:
   workflow_dispatch:
   push:
+    branches:
+      - '**'
     paths:
       - '**'
       - '!docs/**'
@@ -16,6 +18,7 @@ on:
       - '!lib/xdg/**'
       - '!snap/**'
       - '!Telegram/build/**'
+      - 'Telegram/build/version'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
       - '!Telegram/SourceFiles/platform/win/**'
@@ -35,6 +38,7 @@ on:
       - '!lib/xdg/**'
       - '!snap/**'
       - '!Telegram/build/**'
+      - 'Telegram/build/version'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
       - '!Telegram/SourceFiles/platform/win/**'
