@@ -4,6 +4,30 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - '.github/**'
+      - '!.github/workflows/snap.yml'
+      - '!.github/scripts/publish_release_asset.sh'
+      - 'Telegram/Resources/uwp/**'
+      - 'Telegram/Resources/winrc/**'
+      - 'Telegram/SourceFiles/platform/win/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+      - 'Telegram/Telegram/**'
+      - 'Telegram/configure.bat'
+      - 'Telegram/Telegram.plist'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && 'dev' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   snap:
@@ -45,7 +69,19 @@ jobs:
           name: ${{ env.SNAP_FILE }}
           path: ${{ env.SNAP_FILE }}
 
+      - name: Publish GitHub release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'release' || github.event_name == 'push' }}
+          RELEASE_CHANNEL: ${{ github.event_name == 'push' && 'dev' || 'release' }}
+        run: |
+          export RELEASE_ASSET_PATH="$SNAP_FILE"
+          export RELEASE_ASSET_NAME="$SNAP_FILE"
+          export RELEASE_ASSET_LABEL="Snap package"
+          bash .github/scripts/publish_release_asset.sh
+
       - name: Publish to Snap Store
+        if: github.event_name != 'push'
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: snapcraft upload "$SNAP_FILE" --release=stable

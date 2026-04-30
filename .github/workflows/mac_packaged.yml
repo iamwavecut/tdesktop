@@ -11,6 +11,7 @@ on:
       - 'LICENSE'
       - '.github/**'
       - '!.github/workflows/mac_packaged.yml'
+      - '!.github/scripts/publish_release_asset.sh'
       - 'lib/xdg/**'
       - 'snap/**'
       - 'Telegram/build/**'
@@ -28,6 +29,7 @@ on:
       - 'LICENSE'
       - '.github/**'
       - '!.github/workflows/mac_packaged.yml'
+      - '!.github/scripts/publish_release_asset.sh'
       - 'lib/xdg/**'
       - 'snap/**'
       - 'Telegram/build/**'
@@ -36,6 +38,13 @@ on:
       - 'Telegram/SourceFiles/platform/win/**'
       - 'Telegram/SourceFiles/platform/linux/**'
       - 'Telegram/configure.bat'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && 'dev' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
 
@@ -51,9 +60,12 @@ jobs:
     env:
       GIT: "https://github.com"
       CMAKE_GENERATOR: "Ninja"
-      CMAKE_BUILD_TYPE: "Debug"
+      CMAKE_BUILD_TYPE: "Release"
       CMAKE_BUILD_PARALLEL_LEVEL: ""
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
       CMAKE_PREFIX_PATH: "/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt/openal-soft"
+      RNNOISE: "d8ea2b0ec6a88f8a68d6904d75e33b4f09cb2987"
+      WEBRTC: "89df288dd6ba5b2ec95b3c5eaf1e7e0c3a870fc4"
       TDE2E: "51743dfd01dff6179e2d8f7095729caa4e2222e9"
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
@@ -88,11 +100,7 @@ jobs:
           fi
           echo "CACHE_KEY=`md5 -q CACHE_KEY.txt`" >> $GITHUB_ENV
 
-          echo "MACOSX_DEPLOYMENT_TARGET=$(grep 'set(QT_SUPPORTED_MIN_MACOS_VERSION' /opt/homebrew/Cellar/qtbase/*/lib/cmake/Qt6/Qt6ConfigExtras.cmake | sed -E 's/^.*"(.*)"\)$/\1/')" >> $GITHUB_ENV
           echo "LibrariesPath=`pwd`" >> $GITHUB_ENV
-
-          echo "RNNOISE=`curl -sSL --header 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' https://api.github.com/repos/xiph/rnnoise/git/refs/heads/master | jq -r .object.sha`" >> $GITHUB_ENV
-          echo "WEBRTC=`curl -sSL --header 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' https://api.github.com/repos/desktop-app/tg_owt/git/refs/heads/master | jq -r .object.sha`" >> $GITHUB_ENV
 
       - name: RNNoise cache.
         id: cache-rnnoise
@@ -105,8 +113,11 @@ jobs:
         run: |
           cd $LibrariesPath
 
-          git clone --depth=1 $GIT/xiph/rnnoise.git
+          git init rnnoise
           cd rnnoise
+          git remote add origin $GIT/desktop-app/rnnoise.git
+          git fetch --depth=1 origin $RNNOISE
+          git reset --hard FETCH_HEAD
           ./autogen.sh
           ./configure --prefix=$LibrariesPath/local/rnnoise --disable-examples --disable-doc
           make -j$(sysctl -n hw.logicalcpu)
@@ -123,10 +134,19 @@ jobs:
         run: |
           cd $LibrariesPath
 
-          git clone --depth=1 --recursive --shallow-submodules $GIT/desktop-app/tg_owt.git
+          git init tg_owt
           cd tg_owt
+          git remote add origin $GIT/desktop-app/tg_owt.git
+          git fetch --depth=1 origin $WEBRTC
+          git reset --hard FETCH_HEAD
+          git submodule update --init --recursive --depth=1
 
-          cmake -Bbuild . -DCMAKE_INSTALL_PREFIX=$LibrariesPath/local/tg_owt
+          cmake -Bbuild . \
+            -DCMAKE_INSTALL_PREFIX=$LibrariesPath/local/tg_owt \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DTG_OWT_BUILD_AUDIO_BACKENDS=OFF
           cmake --build build
           cmake --install build
 
@@ -147,7 +167,10 @@ jobs:
           git fetch --depth=1 origin $TDE2E
           git reset --hard FETCH_HEAD
 
-          cmake -Bbuild . -DCMAKE_INSTALL_PREFIX=$LibrariesPath/local/tde2e -DTD_E2E_ONLY=ON
+          cmake -Bbuild . \
+            -DCMAKE_INSTALL_PREFIX=$LibrariesPath/local/tde2e \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET \
+            -DTD_E2E_ONLY=ON
           cmake --build build
           cmake --install build
 
@@ -166,7 +189,11 @@ jobs:
             echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
           fi
 
-          cmake -Bbuild . -DTDESKTOP_API_TEST=ON $DEFINE
+          cmake -Bbuild . \
+            -DTDESKTOP_API_TEST=ON \
+            -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET \
+            $DEFINE
           cmake --build build
           APP_BUNDLE="$(find build -maxdepth 1 -type d -name '*.app' -print -quit)"
           if [ -z "$APP_BUNDLE" ]; then
@@ -174,22 +201,47 @@ jobs:
             exit 1
           fi
           macdeployqt "$APP_BUNDLE"
-          codesign --remove-signature "$APP_BUNDLE"
+          codesign --force --deep --sign - "$APP_BUNDLE"
+          codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
-      - name: Move artifact.
+      - name: Package DMG.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           cd $REPO_NAME/build
-          mkdir artifact
+          rm -rf artifact dmg-root
+          mkdir artifact dmg-root
           APP_BUNDLE="$(find . -maxdepth 1 -type d -name '*.app' -print -quit)"
           if [ -z "$APP_BUNDLE" ]; then
             echo "No app bundle found in build."
             exit 1
           fi
-          mv "$APP_BUNDLE" artifact/
+          cp -R "$APP_BUNDLE" "dmg-root/$(basename "$APP_BUNDLE")"
+          ln -s /Applications dmg-root/Applications
+          ARCH="$(uname -m)"
+          DMG_NAME="Forkgram-macos-$ARCH.dmg"
+          hdiutil create \
+            -volname Forkgram \
+            -srcfolder dmg-root \
+            -ov \
+            -format UDZO \
+            "artifact/$DMG_NAME"
+          echo "MACOS_RELEASE_ASSET_NAME=$DMG_NAME" >> $GITHUB_ENV
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: ${{ env.REPO_NAME }}/build/artifact/
+
+      - name: Publish GitHub release asset.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+          RELEASE_CHANNEL: ${{ github.event_name == 'push' && 'dev' || 'release' }}
+        run: |
+          cd "$REPO_NAME"
+          export RELEASE_ASSET_PATH="build/artifact/$MACOS_RELEASE_ASSET_NAME"
+          export RELEASE_ASSET_NAME="$MACOS_RELEASE_ASSET_NAME"
+          export RELEASE_ASSET_LABEL="macOS $(uname -m) DMG"
+          bash .github/scripts/publish_release_asset.sh

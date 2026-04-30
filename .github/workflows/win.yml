@@ -12,6 +12,7 @@ on:
       - 'LICENSE'
       - '.github/**'
       - '!.github/workflows/win.yml'
+      - '!.github/scripts/publish_release_asset.sh'
       - 'lib/xdg/**'
       - 'snap/**'
       - 'Telegram/build/docker/**'
@@ -31,6 +32,7 @@ on:
       - 'LICENSE'
       - '.github/**'
       - '!.github/workflows/win.yml'
+      - '!.github/scripts/publish_release_asset.sh'
       - 'lib/xdg/**'
       - 'snap/**'
       - 'Telegram/build/docker/**'
@@ -40,6 +42,13 @@ on:
       - 'Telegram/Telegram/**'
       - 'Telegram/configure.sh'
       - 'Telegram/Telegram.plist'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && 'dev' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
 
@@ -202,6 +211,31 @@ jobs:
           fi
           echo "TDESKTOP_BUILD_API=$API" >> $GITHUB_ENV
 
+          RELEASE_ASSET_NAME=""
+          RELEASE_ASSET_LABEL=""
+          if [ -z "${{ matrix.generator }}" ]; then
+            case "${{ matrix.arch }}:${{ matrix.qt }}" in
+              x64_x86:)
+                RELEASE_ASSET_NAME="Telegram_x86.zip"
+                RELEASE_ASSET_LABEL="Windows x86 portable build"
+                ;;
+              x64:)
+                RELEASE_ASSET_NAME="Telegram.zip"
+                RELEASE_ASSET_LABEL="Windows x64 portable build"
+                ;;
+              x64:qt6)
+                RELEASE_ASSET_NAME="Telegram_qt6.zip"
+                RELEASE_ASSET_LABEL="Windows x64 Qt 6 portable build"
+                ;;
+              arm64:qt6)
+                RELEASE_ASSET_NAME="Telegram_arm64.zip"
+                RELEASE_ASSET_LABEL="Windows ARM64 portable build"
+                ;;
+            esac
+          fi
+          echo "TDESKTOP_RELEASE_ASSET_NAME=$RELEASE_ASSET_NAME" >> $GITHUB_ENV
+          echo "TDESKTOP_RELEASE_ASSET_LABEL=$RELEASE_ASSET_LABEL" >> $GITHUB_ENV
+
       - name: Free up some disk space.
         shell: bash
         run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
@@ -232,9 +266,26 @@ jobs:
           mkdir artifact
           move %OUT%\Telegram.exe artifact/
           move %OUT%\Updater.exe artifact/
+      - name: Package release asset.
+        if: env.TDESKTOP_RELEASE_ASSET_NAME != ''
+        shell: pwsh
+        run: Compress-Archive -Path artifact\Telegram.exe, artifact\Updater.exe -DestinationPath "artifact\${{ env.TDESKTOP_RELEASE_ASSET_NAME }}" -Force
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\
+      - name: Publish GitHub release asset.
+        if: env.TDESKTOP_RELEASE_ASSET_NAME != ''
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+          RELEASE_CHANNEL: ${{ github.event_name == 'push' && 'dev' || 'release' }}
+        run: |
+          cd "$TBUILD/$REPO_NAME"
+          export RELEASE_ASSET_PATH="$GITHUB_WORKSPACE/artifact/$TDESKTOP_RELEASE_ASSET_NAME"
+          export RELEASE_ASSET_NAME="$TDESKTOP_RELEASE_ASSET_NAME"
+          export RELEASE_ASSET_LABEL="$TDESKTOP_RELEASE_ASSET_LABEL"
+          bash .github/scripts/publish_release_asset.sh
