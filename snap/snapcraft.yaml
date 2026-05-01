@@ -173,8 +173,10 @@ parts:
       - nasm
       - pkg-config
       - libdav1d-dev
+      - libdrm-dev
       - libopenh264-dev
       - libopus-dev
+      - libva-dev
       - libvdpau-dev
       - libvpx-dev
       - libxv-dev
