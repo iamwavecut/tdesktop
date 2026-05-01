@@ -32,3 +32,13 @@ elif '"source-type": "local"' in text:
     print("Snapcraft GNOME extension already has local source type.")
 else:
     raise SystemExit("Could not patch Snapcraft GNOME extension source type.")
+
+extension_data = Path("/usr/share/snapcraft/extensions/desktop")
+package_data = Path("/usr/lib/python3.12/site-packages/extensions/desktop")
+
+if not extension_data.exists():
+    if not package_data.exists():
+        raise SystemExit("Could not find Snapcraft desktop extension data.")
+    extension_data.parent.mkdir(parents=True, exist_ok=True)
+    extension_data.symlink_to(package_data, target_is_directory=True)
+    print(f"Linked Snapcraft desktop extension data from {package_data}.")
