@@ -17,6 +17,8 @@ on:
       - '!.github/**'
       - '.github/workflows/snap.yml'
       - '.github/scripts/publish_release_asset.sh'
+      - '!Telegram/build/**'
+      - 'Telegram/build/version'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
       - '!Telegram/SourceFiles/platform/win/**'
@@ -46,8 +48,17 @@ jobs:
 
       - name: Setup LXD
         run: |
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              if [ "$attempt" = 5 ]; then
+                return 1
+              fi
+              sleep $((attempt * 20))
+            done
+          }
           sudo iptables -P FORWARD ACCEPT
-          sudo snap install --classic snapcraft
+          retry sudo snap install --classic snapcraft
           sudo usermod -aG lxd $USER
           sudo lxd init --auto
           sudo lxd waitready
