@@ -63,7 +63,7 @@ jobs:
               apt-get update
               python3 .github/scripts/patch_snapcraft_gnome_extension.py
               snapcraft expand-extensions | grep -A4 "gnome/sdk:" | grep -q "source-type: local"
-              snapcraft --verbosity=debug
+              snapcraft --destructive-mode --verbosity=debug
             '
           sudo chown -R "$USER:$USER" .
 
