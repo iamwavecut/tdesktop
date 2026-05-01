@@ -78,8 +78,15 @@ elif [[ "$BetaChannel" != "0" ]]; then
 fi
 
 if [[ "$ReleaseChannel" == "dev" ]]; then
+  GitServer="${GITHUB_SERVER_URL:-https://github.com}"
+  GitServer="${GitServer%/}"
+  if [[ "$GitServer" != https://* ]]; then
+    echo "::error::Unsupported GITHUB_SERVER_URL for authenticated tag push: $GitServer"
+    exit 1
+  fi
+  GitRemote="${GitServer#https://}/${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
   git tag -f "$Tag" "$WorkflowSha"
-  git push origin "refs/tags/$Tag" --force
+  git push "https://x-access-token:${GH_TOKEN}@${GitRemote}.git" "refs/tags/$Tag" --force
 fi
 
 NotesFile="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/forkgram-release-notes-$AppVersionStr.md"
