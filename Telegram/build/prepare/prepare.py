@@ -1671,6 +1671,7 @@ win:
         -trace no ^
         -feature-c++20 ^
         -openssl linked ^
+        -no-feature-winsdkicu ^
         -system-webp ^
         -system-zlib ^
         -system-libjpeg ^

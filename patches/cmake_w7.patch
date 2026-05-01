@@ -2,15 +2,16 @@ diff --git a/external/qt/CMakeLists.txt b/external/qt/CMakeLists.txt
 index 577b67b..6754d23 100644
 --- a/external/qt/CMakeLists.txt
 +++ b/external/qt/CMakeLists.txt
-@@ -215,8 +215,9 @@ if (WIN32)
+@@ -215,8 +215,12 @@ if (WIN32)
              D3D12
              SetupAPI
              Shcore
--            Synchronization
--            WindowsApp
+             Synchronization
 +            Secur32
 +            WinHttp
 +            ncrypt
++            Uiautomationcore
+             WindowsApp
          )
      else()
          target_link_libraries(external_qt

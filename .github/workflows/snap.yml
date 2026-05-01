@@ -50,16 +50,13 @@ jobs:
         uses: samueldr/more-space-action@97048bd0df83fb05b5257887bdbaffc848887673
         with:
           enable-remove-default-apt-patterns: false
-          enable-lvm-span: true
-          lvm-span-mountpoint: /var/lib/docker
 
       - name: Build snap
         run: |
           docker run --rm --privileged \
-            -v "$PWD":/build \
-            -w /build \
-            canonical/snapcraft:8_core24 \
-            snapcraft --verbosity=debug
+            -v "$PWD":/project \
+            ghcr.io/canonical/snapcraft:8_core24 \
+            --verbosity=debug
           sudo chown -R "$USER:$USER" .
 
       - name: Find snap artifact
