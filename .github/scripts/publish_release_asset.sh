@@ -62,14 +62,6 @@ if [[ "$AlphaVersion" != "0" ]]; then
   exit 0
 fi
 
-if [[ "$ReleaseChannel" == "dev" && "$GITHUB_EVENT_NAME" == "push" && -n "${GITHUB_REF_NAME:-}" ]]; then
-  RemoteHead="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | awk '{ print $1 }')"
-  if [[ -n "$RemoteHead" && "$RemoteHead" != "$WorkflowSha" ]]; then
-    echo "::notice::Skip stale dev release publishing for $WorkflowSha; origin/$GITHUB_REF_NAME is $RemoteHead."
-    exit 0
-  fi
-fi
-
 Tag="v$AppVersionStr"
 ReleaseName="Forkgram $AppVersionStr"
 PrereleaseArgs=()

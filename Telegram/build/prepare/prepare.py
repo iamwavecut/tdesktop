@@ -1564,6 +1564,8 @@ win:
         -nomake tests ^
         -platform win32-msvc
 
+    if not exist qtimageformats\\mkspecs\\modules-inst mkdir qtimageformats\\mkspecs\\modules-inst
+    if not exist qtsvg\\mkspecs\\modules-inst mkdir qtsvg\\mkspecs\\modules-inst
     jom -j%NUMBER_OF_PROCESSORS%
     jom -j%NUMBER_OF_PROCESSORS% install
 mac:
