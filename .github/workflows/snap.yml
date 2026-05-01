@@ -91,7 +91,12 @@ jobs:
           RELEASE_CHANNEL: ${{ github.event_name == 'push' && 'dev' || 'release' }}
         run: |
           export RELEASE_ASSET_PATH="$SNAP_FILE"
-          export RELEASE_ASSET_NAME="$SNAP_FILE"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            export RELEASE_ASSET_NAME="Forkgram-linux-amd64.snap"
+            export RELEASE_DELETE_ASSET_PATTERN="forkgram_*.snap"
+          else
+            export RELEASE_ASSET_NAME="$SNAP_FILE"
+          fi
           export RELEASE_ASSET_LABEL="Snap package"
           bash .github/scripts/publish_release_asset.sh
 

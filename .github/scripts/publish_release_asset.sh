@@ -62,6 +62,14 @@ if [[ "$AlphaVersion" != "0" ]]; then
   exit 0
 fi
 
+if [[ "$ReleaseChannel" == "dev" && "$GITHUB_EVENT_NAME" == "push" && -n "${GITHUB_REF_NAME:-}" ]]; then
+  RemoteHead="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | awk '{ print $1 }')"
+  if [[ -n "$RemoteHead" && "$RemoteHead" != "$WorkflowSha" ]]; then
+    echo "::notice::Skip stale dev release publishing for $WorkflowSha; origin/$GITHUB_REF_NAME is $RemoteHead."
+    exit 0
+  fi
+fi
+
 Tag="v$AppVersionStr"
 ReleaseName="Forkgram $AppVersionStr"
 PrereleaseArgs=()
@@ -136,6 +144,15 @@ mkdir -p "$UploadDir"
 UploadPath="$UploadDir/$AssetName"
 rm -f "$UploadPath"
 cp "$AssetPath" "$UploadPath"
+
+DeleteAssetPattern="${RELEASE_DELETE_ASSET_PATTERN:-}"
+if [[ -n "$DeleteAssetPattern" ]]; then
+  while IFS= read -r ExistingAsset; do
+    if [[ "$ExistingAsset" == $DeleteAssetPattern && "$ExistingAsset" != "$AssetName" ]]; then
+      gh release delete-asset "$Tag" "$ExistingAsset" -y || true
+    fi
+  done < <(gh release view "$Tag" --json assets --jq '.assets[].name')
+fi
 
 UploadArg="$UploadPath"
 if [[ -n "$AssetLabel" ]]; then
