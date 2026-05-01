@@ -456,7 +456,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 4519c85c924b9da81f29d4aac045886f896ee479
+    git checkout dbac5a484563cac1788feac49834bd90292feaa2
 """)
 
 if 'win7' in options:
