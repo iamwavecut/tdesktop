@@ -46,32 +46,21 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Setup LXD
-        run: |
-          retry() {
-            for attempt in 1 2 3 4 5; do
-              "$@" && return 0
-              if [ "$attempt" = 5 ]; then
-                return 1
-              fi
-              sleep $((attempt * 20))
-            done
-          }
-          sudo iptables -P FORWARD ACCEPT
-          retry sudo snap install --classic snapcraft
-          sudo usermod -aG lxd $USER
-          sudo lxd init --auto
-          sudo lxd waitready
-
       - name: Free up disk space
         uses: samueldr/more-space-action@97048bd0df83fb05b5257887bdbaffc848887673
         with:
           enable-remove-default-apt-patterns: false
           enable-lvm-span: true
-          lvm-span-mountpoint: /var/snap/lxd/common/lxd/storage-pools/default/containers
+          lvm-span-mountpoint: /var/lib/docker
 
       - name: Build snap
-        run: sudo -u $USER snap run snapcraft --verbosity=debug
+        run: |
+          docker run --rm --privileged \
+            -v "$PWD":/build \
+            -w /build \
+            canonical/snapcraft:8_core24 \
+            snapcraft --verbosity=debug
+          sudo chown -R "$USER:$USER" .
 
       - name: Find snap artifact
         run: |

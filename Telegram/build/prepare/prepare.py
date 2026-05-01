@@ -1646,7 +1646,7 @@ mac:
 win:
     cd qtbase
     echo Applying Qt6 Windows 7 compatibility patches...
-    xcopy /E /Y "%LIBS_DIR%\\qt6windows7\\qtbase\\src" src\\
+    if exist "%LIBS_DIR%\\qt6windows7\\qtbase\\src" xcopy /E /Y "%LIBS_DIR%\\qt6windows7\\qtbase\\src" src\\
     for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do git apply %%i -v
     cd ..
 
