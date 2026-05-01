@@ -171,6 +171,7 @@ parts:
     plugin: autotools
     build-packages:
       - nasm
+      - pkg-config
       - libdav1d-dev
       - libopenh264-dev
       - libopus-dev
