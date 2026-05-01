@@ -16,6 +16,7 @@ on:
       - '!LICENSE'
       - '!.github/**'
       - '.github/workflows/snap.yml'
+      - '.github/scripts/patch_snapcraft_gnome_extension.py'
       - '.github/scripts/publish_release_asset.sh'
       - '!Telegram/build/**'
       - 'Telegram/build/version'
@@ -55,8 +56,15 @@ jobs:
         run: |
           docker run --rm --privileged \
             -v "$PWD":/project \
+            -w /project \
+            --entrypoint bash \
             ghcr.io/canonical/snapcraft:8_core24 \
-            --verbosity=debug
+            -euo pipefail -c '
+              apt-get update
+              python3 .github/scripts/patch_snapcraft_gnome_extension.py
+              snapcraft expand-extensions | grep -A4 "gnome/sdk:" | grep -q "source-type: local"
+              snapcraft --verbosity=debug
+            '
           sudo chown -R "$USER:$USER" .
 
       - name: Find snap artifact
