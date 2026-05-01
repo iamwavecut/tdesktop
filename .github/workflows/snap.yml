@@ -62,6 +62,7 @@ jobs:
             -euo pipefail -c '
               apt-get update
               export PATH="/usr/libexec/snapcraft:$PATH"
+              printf "[safe]\n\tdirectory = /project\n\tdirectory = /project/.git\n" > /root/.gitconfig
               python3 .github/scripts/patch_snapcraft_gnome_extension.py
               snapcraft expand-extensions | grep -A4 "gnome/sdk:" | grep -q "source-type: local"
               snapcraft --destructive-mode --verbosity=debug
