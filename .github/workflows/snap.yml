@@ -61,6 +61,7 @@ jobs:
             ghcr.io/canonical/snapcraft:8_core24 \
             -euo pipefail -c '
               apt-get update
+              export PATH="/usr/libexec/snapcraft:$PATH"
               python3 .github/scripts/patch_snapcraft_gnome_extension.py
               snapcraft expand-extensions | grep -A4 "gnome/sdk:" | grep -q "source-type: local"
               snapcraft --destructive-mode --verbosity=debug
