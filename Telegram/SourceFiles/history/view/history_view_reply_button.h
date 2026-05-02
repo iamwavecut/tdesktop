@@ -34,6 +34,7 @@ struct ButtonParameters {
 	}
 
 	FullMsgId context;
+	QString text;
 	QPoint center;
 	QPoint pointer;
 	QPoint globalPointer;
@@ -43,7 +44,7 @@ struct ButtonParameters {
 	bool outside = false;
 };
 
-[[nodiscard]] int ComputeInnerWidth();
+[[nodiscard]] int ComputeInnerWidth(const QString &text = QString());
 
 enum class ButtonState {
 	Hidden,
@@ -126,10 +127,12 @@ private:
 		float64 scale);
 	void removeStaleButtons();
 	void clearAppearAnimations();
+	void updateText(const QString &text);
 	[[nodiscard]] QMargins innerMargins() const;
 	[[nodiscard]] QRect buttonInner() const;
 	[[nodiscard]] QRect buttonInner(not_null<Button*> button) const;
 
+	QString _textValue;
 	QSize _outer;
 	QRect _inner;
 	Ui::RoundAreaWithShadow _cachedRound;

@@ -324,6 +324,10 @@ ChatWidget::ChatWidget(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
 	}, _topBar->lifetime());
+	_topBar->clearFromChatSelectionRequest(
+	) | rpl::on_next([=] {
+		confirmClearSelected();
+	}, _topBar->lifetime());
 	_topBar->forwardSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmForwardSelected();
@@ -3154,7 +3158,8 @@ bool ChatWidget::listAllowsMultiSelect() {
 
 bool ChatWidget::listIsItemGoodForSelection(
 		not_null<HistoryItem*> item) {
-	return item->isRegular() && !item->isService();
+	return (item->isRegular() && !item->isService())
+		|| item->canRemoveLocally();
 }
 
 bool ChatWidget::listIsLessInOrder(
@@ -3171,6 +3176,9 @@ void ChatWidget::listSelectionChanged(SelectedItems &&items) {
 	for (const auto &item : items) {
 		if (item.canDelete) {
 			++state.canDeleteCount;
+		}
+		if (item.canRemoveLocally) {
+			++state.canRemoveLocallyCount;
 		}
 		if (item.canForward) {
 			++state.canForwardCount;
@@ -3518,6 +3526,10 @@ void ChatWidget::setupEmptyPainter() {
 
 void ChatWidget::confirmDeleteSelected() {
 	ConfirmDeleteSelectedItems(_inner);
+}
+
+void ChatWidget::confirmClearSelected() {
+	ConfirmClearSelectedItems(_inner);
 }
 
 void ChatWidget::confirmForwardSelected() {

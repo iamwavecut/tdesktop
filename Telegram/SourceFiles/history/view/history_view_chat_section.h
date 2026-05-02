@@ -293,6 +293,7 @@ private:
 	void updatePinnedVisibility();
 
 	void confirmDeleteSelected();
+	void confirmClearSelected();
 	void confirmForwardSelected();
 	void clearSelected();
 	void setPinnedVisibility(bool shown);

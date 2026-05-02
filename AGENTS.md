@@ -49,6 +49,19 @@ cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 - Requires Xcode
 - Dependencies: `../Libraries/local/Qt-*`
 - Set `QT` environment variable: `export QT=6.8`
+- For this local Forkgram macOS checkout, use the `tdesktop-macos-build`
+  skill when the user asks for a release build, packaging, or installation.
+- For routine code-only iterations after a fully packaged
+  `/Applications/Forkgram.app` already exists, prefer
+  `Telegram/build/mac_fast_install_forkgram.sh`. It builds `Release`, replaces
+  only `Contents/MacOS/Forkgram` in the installed app, rewrites Homebrew/local
+  install names to bundled frameworks, signs, verifies, and prints source and
+  installed executable hashes for traceability. Do not use it while Forkgram is
+  running.
+- Use the full packaging/install flow instead of fast install when dependencies,
+  Qt plugins, app resources that must be bundled, CMake/configure settings,
+  `Info.plist`, entitlements, or signing requirements changed, when the
+  installed packaged app is missing, or for a final distributable handoff.
 
 ### Linux
 - Build dependencies in `../Libraries`
@@ -449,4 +462,3 @@ The `Error` template parameter defaults to `rpl::no_error`: `rpl::producer<Type,
 - Pass `rpl::lifetime` to `on_...` methods or store returned lifetime
 - Use `rpl::duplicate(producer)` to reuse a producer multiple times
 - Combined producers automatically unpack tuples in lambdas (works with `rpl::map`, `rpl::filter`, and `rpl::on_next`)
-

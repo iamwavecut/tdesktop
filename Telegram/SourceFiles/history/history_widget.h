@@ -210,6 +210,7 @@ public:
 		not_null<const HistoryItem*> item) const;
 
 	MessageIdsList getSelectedItems() const;
+	MessageIdsList getSelectedItemsForLocalClear() const;
 	void itemEdited(not_null<HistoryItem*> item);
 
 	void replyToMessage(FullReplyTo id);
@@ -293,6 +294,7 @@ public:
 
 	void forwardSelected();
 	void confirmDeleteSelected();
+	void confirmClearSelected();
 	void clearSelected();
 
 	[[nodiscard]] SendMenu::Details sendMenuDetails() const;

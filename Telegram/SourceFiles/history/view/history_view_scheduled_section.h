@@ -227,6 +227,7 @@ private:
 
 	void confirmSendNowSelected();
 	void confirmDeleteSelected();
+	void confirmClearSelected();
 	void clearSelected();
 
 	[[nodiscard]] Api::SendAction prepareSendAction(

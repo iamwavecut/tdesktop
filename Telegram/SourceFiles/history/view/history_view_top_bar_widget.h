@@ -52,6 +52,7 @@ public:
 		bool textSelected = false;
 		int count = 0;
 		int canDeleteCount = 0;
+		int canRemoveLocallyCount = 0;
 		int canForwardCount = 0;
 		int canSendNowCount = 0;
 	};
@@ -107,6 +108,9 @@ public:
 	}
 	[[nodiscard]] rpl::producer<> deleteSelectionRequest() const {
 		return _deleteSelection.events();
+	}
+	[[nodiscard]] rpl::producer<> clearFromChatSelectionRequest() const {
+		return _clearFromChatSelection.events();
 	}
 	[[nodiscard]] rpl::producer<> clearSelectionRequest() const {
 		return _clearSelection.events();
@@ -210,6 +214,7 @@ private:
 
 	int _selectedCount = 0;
 	bool _canDelete = false;
+	bool _canClearFromChat = false;
 	bool _canForward = false;
 	bool _canSendNow = false;
 	bool _searchMode = false;
@@ -218,7 +223,8 @@ private:
 	Ui::Animations::Simple _searchShown;
 
 	object_ptr<Ui::RoundButton> _clear;
-	object_ptr<Ui::RoundButton> _forward, _sendNow, _delete, _forwardAndDelete;
+	object_ptr<Ui::RoundButton> _forward, _sendNow, _delete, _clearFromChat;
+	object_ptr<Ui::RoundButton> _forwardAndDelete;
 	object_ptr<Ui::InputField> _searchField = { nullptr };
 	object_ptr<Ui::FadeWrapScaled<Ui::IconButton>> _chooseFromUser
 		= { nullptr };
@@ -265,6 +271,7 @@ private:
 	rpl::event_stream<> _forwardAndDeleteSelection;
 	rpl::event_stream<> _sendNowSelection;
 	rpl::event_stream<> _deleteSelection;
+	rpl::event_stream<> _clearFromChatSelection;
 	rpl::event_stream<> _clearSelection;
 	rpl::event_stream<> _cancelChooseForReport;
 

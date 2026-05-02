@@ -180,6 +180,7 @@ private:
 	void searchInPinned();
 
 	void confirmDeleteSelected();
+	void confirmClearSelected();
 	void confirmForwardSelected();
 	void clearSelected();
 	void recountChatWidth();

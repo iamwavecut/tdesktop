@@ -54,6 +54,8 @@ public:
 		int64 tonStake = 0;
 		int stars = 0;
 		TimeId scheduleRepeatPeriod = 0;
+		TimeId deletedDate = 0;
+		int editCount = 0;
 		std::optional<int> views;
 		std::optional<int> replies;
 		std::optional<int> forwardsCount;
@@ -114,15 +116,22 @@ private:
 		QPoint position) const;
 	[[nodiscard]] ClickHandlerPtr replayEffectLink(
 		not_null<const Message*> view) const;
+	[[nodiscard]] ClickHandlerPtr editedLink(
+		not_null<const Message*> view) const;
 
 	const not_null<::Data::Reactions*> _reactionsOwner;
 	Data _data;
 	Ui::Text::String _authorEditedDate;
+	Ui::Text::String _editedLabelText;
+	Ui::Text::String _deletedDateLabel;
 	Ui::Text::String _views;
 	Ui::Text::String _replies;
 	std::unique_ptr<Effect> _effect;
 	mutable ClickHandlerPtr _replayLink;
+	mutable ClickHandlerPtr _editedLink;
 	int _effectMaxWidth = 0;
+	int _editedLabelLeft = 0;
+	int _editedLabelWidth = 0;
 	bool _authorElided = false;
 
 };

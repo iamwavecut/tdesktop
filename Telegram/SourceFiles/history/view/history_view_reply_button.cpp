@@ -35,31 +35,35 @@ constexpr auto kButtonHideDelay = crl::time(300);
 	return scale;
 }
 
-[[nodiscard]] QSize ComputeInnerSize() {
-	return QSize(ComputeInnerWidth(), st::replyCornerHeight);
+[[nodiscard]] QString ResolveText(const QString &text) {
+	return text.isEmpty() ? tr::lng_fast_reply(tr::now) : text;
 }
 
-[[nodiscard]] QSize ComputeOuterSize() {
+[[nodiscard]] QSize ComputeInnerSize(const QString &text) {
+	return QSize(ComputeInnerWidth(text), st::replyCornerHeight);
+}
+
+[[nodiscard]] QSize ComputeOuterSize(const QString &text) {
 	return QRect(
 		QPoint(),
-		ComputeInnerSize()
+		ComputeInnerSize(text)
 	).marginsAdded(st::replyCornerShadow).size();
 }
 
 } // namespace
 
-int ComputeInnerWidth() {
+int ComputeInnerWidth(const QString &text) {
 	struct Cached {
 		QString text;
 		int result = 0;
 	};
 	static auto cached = Cached();
-	const auto &text = tr::lng_fast_reply(tr::now);
-	if (cached.text != text) {
+	const auto resolved = ResolveText(text);
+	if (cached.text != resolved) {
 		const auto &padding = st::replyCornerTextPadding;
-		const auto textWidth = st::msgDateTextStyle.font->width(text);
+		const auto textWidth = st::msgDateTextStyle.font->width(resolved);
 		cached.result = padding.left() + textWidth + padding.right();
-		cached.text = text;
+		cached.text = resolved;
 	}
 	return cached.result;
 }
@@ -159,16 +163,17 @@ void Button::applyState(ButtonState state, Fn<void(QRect)> update) {
 }
 
 Manager::Manager(Fn<void(QRect)> buttonUpdate)
-: _outer(ComputeOuterSize())
-, _inner(QRect(QPoint(), ComputeInnerSize()))
+: _textValue(ResolveText(QString()))
+, _outer(ComputeOuterSize(_textValue))
+, _inner(QRect(QPoint(), ComputeInnerSize(_textValue)))
 , _cachedRound(
-	ComputeInnerSize(),
+	ComputeInnerSize(_textValue),
 	st::replyCornerShadow,
-	ComputeInnerSize().height())
+	ComputeInnerSize(_textValue).height())
 , _buttonShowTimer([=] { showButtonDelayed(); })
 , _buttonUpdate(std::move(buttonUpdate))
-, _text(st::msgDateTextStyle.font->width(tr::lng_fast_reply(tr::now))) {
-	_text.setText(st::msgDateTextStyle, tr::lng_fast_reply(tr::now));
+, _text(st::msgDateTextStyle.font->width(_textValue)) {
+	_text.setText(st::msgDateTextStyle, _textValue);
 	_inner.translate(
 		QRect(QPoint(), _outer).center() - _inner.center());
 }
@@ -177,14 +182,25 @@ Manager::~Manager() = default;
 
 void Manager::updateButton(ButtonParameters parameters) {
 	const auto contextChanged = (_buttonContext != parameters.context);
-	if (contextChanged) {
+	const auto text = ResolveText(parameters.text);
+	const auto textChanged = (_textValue != text);
+	if (contextChanged || textChanged) {
 		if (_button) {
-			_button->applyState(ButtonState::Hidden);
-			_buttonHiding.push_back(std::move(_button));
+			if (textChanged) {
+				_button->repaint();
+				_button = nullptr;
+			} else {
+				_button->applyState(ButtonState::Hidden);
+				_buttonHiding.push_back(std::move(_button));
+			}
 		}
 		_buttonShowTimer.cancel();
 		_scheduledParameters = std::nullopt;
 		_ripple = nullptr;
+	}
+	if (textChanged) {
+		clearAppearAnimations();
+		updateText(text);
 	}
 	_buttonContext = parameters.context;
 	_lastPointer = parameters.pointer;
@@ -390,6 +406,20 @@ void Manager::clearAppearAnimations() {
 			button->repaint();
 		}
 	}
+}
+
+void Manager::updateText(const QString &text) {
+	_textValue = text;
+	_outer = ComputeOuterSize(_textValue);
+	_inner = QRect(QPoint(), ComputeInnerSize(_textValue));
+	_cachedRound = Ui::RoundAreaWithShadow(
+		ComputeInnerSize(_textValue),
+		st::replyCornerShadow,
+		ComputeInnerSize(_textValue).height());
+	_text = Ui::Text::String(st::msgDateTextStyle.font->width(_textValue));
+	_text.setText(st::msgDateTextStyle, _textValue);
+	_inner.translate(
+		QRect(QPoint(), _outer).center() - _inner.center());
 }
 
 } // namespace HistoryView::ReplyButton

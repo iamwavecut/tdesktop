@@ -108,6 +108,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 
 #include <QtGui/QGuiApplication>
@@ -121,6 +122,37 @@ namespace {
 constexpr auto kRescheduleLimit = 20;
 constexpr auto kTagNameLimit = 12;
 constexpr auto kPublicPostLinkToastDuration = 4 * crl::time(1000);
+
+[[nodiscard]] QString ClearFromChatText() {
+	return tr::lng_context_remove_from_chat(tr::now);
+}
+
+[[nodiscard]] QString ClearFromChatConfirmText(int count) {
+	return (count == 1)
+		? tr::lng_selected_clear_from_chat_sure_this(tr::now)
+		: tr::lng_selected_clear_from_chat_sure(
+			tr::now,
+			lt_count,
+			count);
+}
+
+[[nodiscard]] QString ClearFromChatButtonText() {
+	return tr::lng_selected_clear_from_chat_confirm(tr::now);
+}
+
+void HideLocally(
+		not_null<Data::Session*> owner,
+		const SelectedItems &items,
+		not_null<ListWidget*> list) {
+	for (const auto &selected : items) {
+		if (const auto item = owner->message(selected.msgId)) {
+			if (item->canRemoveLocally()) {
+				item->hideLocally();
+			}
+		}
+	}
+	list->cancelSelection();
+}
 
 bool HasEditMessageAction(
 		const ContextMenuRequest &request,
@@ -877,6 +909,40 @@ bool AddDeleteSelectedAction(
 	return true;
 }
 
+bool AddRemoveSelectedFromChatAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	if (request.selectedItems.empty()) {
+		return false;
+	}
+	const auto controller = list->controller();
+	const auto owner = &controller->session().data();
+	const auto count = int(ranges::count_if(
+		request.selectedItems,
+		[&](const SelectedItem &selected) {
+			const auto item = owner->message(selected.msgId);
+			return item && item->canRemoveLocally();
+		}));
+	if (count != int(request.selectedItems.size())) {
+		return false;
+	}
+
+	menu->addAction(ClearFromChatText(), [=] {
+		controller->show(Ui::MakeConfirmBox({
+			.text = ClearFromChatConfirmText(count),
+			.confirmed = crl::guard(list, [=](Fn<void()> close) {
+				close();
+				HideLocally(owner, request.selectedItems, list);
+			}),
+			.confirmText = ClearFromChatButtonText(),
+			.cancelText = tr::lng_cancel(tr::now),
+			.confirmStyle = &st::attentionBoxButton,
+		}));
+	}, &st::menuIconDelete);
+	return true;
+}
+
 bool AddDeleteMessageAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
@@ -948,6 +1014,32 @@ void AddDeleteAction(
 	if (!AddDeleteSelectedAction(menu, request, list)) {
 		AddDeleteMessageAction(menu, request, list);
 	}
+}
+
+bool AddRemoveFromChatAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	if (AddRemoveSelectedFromChatAction(menu, request, list)) {
+		return true;
+	}
+	const auto item = request.item;
+	if (!item || !item->canRemoveLocally()) {
+		return false;
+	}
+	const auto owner = &item->history()->owner();
+	const auto controller = list->controller();
+	const auto itemId = item->fullId();
+	menu->addAction(
+		ClearFromChatText(),
+		crl::guard(controller, [=] {
+			if (const auto item = owner->message(itemId)) {
+				item->hideLocally();
+			}
+			list->cancelSelection();
+		}),
+		&st::menuIconDelete);
+	return true;
 }
 
 void AddDownloadFilesAction(
@@ -1072,6 +1164,7 @@ void AddMessageActions(
 	AddForwardAction(menu, request, list);
 	AddSendNowAction(menu, request, list);
 	AddDeleteAction(menu, request, list);
+	AddRemoveFromChatAction(menu, request, list);
 	AddDownloadFilesAction(menu, request, list);
 	AddReportAction(menu, request, list);
 	AddSelectionAction(menu, request, list);

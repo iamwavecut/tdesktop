@@ -35,6 +35,7 @@ The successful result was:
 - package a portable ad-hoc-signed app at `out/Release/Forkgram.app`
 - verify `codesign --verify --deep --strict --verbose=2 out/Release/Forkgram.app`
 - verify there are no leftover absolute references to `/opt/homebrew` or `out/macos-local/prefix`
+- for routine code-only iterations after a full packaged install exists, fast-install with `Telegram/build/mac_fast_install_forkgram.sh`
 - install the packaged release app into `/Applications/Forkgram.app` once the running app is closed
 - package a standalone unsigned DMG at `out/Release/Forkgram-macos-arm64.dmg`
 
@@ -46,6 +47,8 @@ The successful result was:
 - Use `-DTDESKTOP_API_TEST=ON` for a local non-deployment build unless the user provides real API credentials.
 - On Xcode 26 SDKs, use `-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0` for app configure and for locally built dependencies. This is the key workaround for the obsolete desktop-capture APIs in `tg_owt`.
 - If `/Applications/Forkgram.app` is running, do not replace the bundle in place. Close the app first, then copy the packaged release bundle into `/Applications`.
+- Prefer the fast-install script for repeated local UI/code iterations when `/Applications/Forkgram.app` is already fully packaged and dependencies/resources/signing layout did not change.
+- Use full packaging instead of fast install after dependency, Qt plugin, CMake/configure, `Info.plist`, entitlement, signing, or bundle-resource changes, or before handing off a final distributable build.
 
 ## Homebrew deps
 
@@ -258,6 +261,33 @@ Expected output location:
 
 - `out/Release/Forkgram.app`
 - executable at `out/Release/Forkgram.app/Contents/MacOS/Forkgram`
+
+## Fast local install for iteration
+
+After one full packaged install exists in `/Applications/Forkgram.app`, routine C++/UI iterations do not need to rerun `macdeployqt`, copy all frameworks, or deep-sign the entire bundle. Use the local helper:
+
+```bash
+Telegram/build/mac_fast_install_forkgram.sh
+```
+
+What it does:
+
+- builds `cmake --build out --config Release --target Forkgram`
+- requires an existing packaged `/Applications/Forkgram.app`
+- refuses to replace the app while `Forkgram` is running
+- copies only `out/Release/Forkgram.app/Contents/MacOS/Forkgram`
+- rewrites `/opt/homebrew` and `out/macos-local/prefix` executable deps to the already bundled `Contents/Frameworks` paths, preserving Qt framework paths
+- signs the executable and the outer app bundle, verifies them with shallow `codesign --verify --strict --verbose=1`, checks the installed executable for leftover absolute local deps, and prints source/installed SHA-256 hashes for traceability. The hashes can differ because the installed executable is rewritten and signed.
+
+Useful options:
+
+```bash
+Telegram/build/mac_fast_install_forkgram.sh --skip-build
+Telegram/build/mac_fast_install_forkgram.sh --copy-resources
+Telegram/build/mac_fast_install_forkgram.sh --deep-sign
+```
+
+Use `--copy-resources` when the Release build updated app resources that are not embedded in the executable. Use `--deep-sign` for a stronger but slower local check when time is less important. If the installed app is missing, does not contain bundled frameworks/plugins, or the helper reports missing bundled dependencies, run the full packaging/install flow below.
 
 ## Release packaging and DMG
 

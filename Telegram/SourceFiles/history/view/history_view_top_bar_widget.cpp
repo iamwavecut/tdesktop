@@ -121,6 +121,7 @@ TopBarWidget::TopBarWidget(
 , _forward(this, tr::lng_selected_forward(), st::defaultActiveButton)
 , _sendNow(this, tr::lng_selected_send_now(), st::defaultActiveButton)
 , _delete(this, tr::lng_selected_delete(), st::defaultActiveButton)
+, _clearFromChat(this, tr::lng_selected_clear_from_chat(), st::defaultActiveButton)
 , _forwardAndDelete(this, rpl::single(u"Both"_q), st::defaultActiveButton)
 , _back(this, st::historyTopBarBack)
 , _cancelChoose(this, st::topBarCloseChoose)
@@ -137,6 +138,7 @@ TopBarWidget::TopBarWidget(
 	_forward->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	_sendNow->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	_delete->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
+	_clearFromChat->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 
 	Lang::Updated(
 	) | rpl::on_next([=] {
@@ -157,6 +159,10 @@ TopBarWidget::TopBarWidget(
 	_sendNow->setWidthChangedCallback([=] { updateControlsGeometry(); });
 	_delete->setClickedCallback([=] { _deleteSelection.fire({}); });
 	_delete->setWidthChangedCallback([=] { updateControlsGeometry(); });
+	_clearFromChat->setClickedCallback([=] {
+		_clearFromChatSelection.fire({});
+	});
+	_clearFromChat->setWidthChangedCallback([=] { updateControlsGeometry(); });
 	_clear->setClickedCallback([=] { _clearSelection.fire({}); });
 	_call->setClickedCallback([=] { call({}); });
 	_call->setAcceptBoth(true, true);
@@ -1073,6 +1079,7 @@ void TopBarWidget::updateControlsGeometry() {
 	auto buttonsWidth = (_forward->isHidden() ? 0 : _forward->contentWidth())
 		+ (_sendNow->isHidden() ? 0 : _sendNow->contentWidth())
 		+ (_delete->isHidden() ? 0 : _delete->contentWidth())
+		+ (_clearFromChat->isHidden() ? 0 : _clearFromChat->contentWidth())
 		+ (_forwardAndDelete->isHidden() ? 0 : _forwardAndDelete->contentWidth())
 		+ _clear->width();
 	buttonsWidth += buttonsLeft + st::topBarActionSkip * 3;
@@ -1083,6 +1090,7 @@ void TopBarWidget::updateControlsGeometry() {
 	_forwardAndDelete->setFullWidth(buttonFullWidth);
 	_sendNow->setFullWidth(buttonFullWidth);
 	_delete->setFullWidth(buttonFullWidth);
+	_clearFromChat->setFullWidth(buttonFullWidth);
 
 	selectedButtonsTop += (height() - _forward->height()) / 2;
 
@@ -1097,6 +1105,14 @@ void TopBarWidget::updateControlsGeometry() {
 	}
 
 	_delete->moveToLeft(buttonsLeft, selectedButtonsTop);
+	if (!_delete->isHidden()) {
+		buttonsLeft += _delete->width() + st::topBarActionSkip;
+	}
+
+	_clearFromChat->moveToLeft(buttonsLeft, selectedButtonsTop);
+	if (!_clearFromChat->isHidden()) {
+		buttonsLeft += _clearFromChat->width() + st::topBarActionSkip;
+	}
 	{
 		const auto large = st::topBarActionButtonLargeRadius;
 		const auto &buttonSt = st::defaultActiveButton;
@@ -1107,6 +1123,7 @@ void TopBarWidget::updateControlsGeometry() {
 			_forward.data(),
 			_sendNow.data(),
 			_delete.data(),
+			_clearFromChat.data(),
 		};
 		auto first = (Ui::RoundButton*)(nullptr);
 		auto last = (Ui::RoundButton*)(nullptr);
@@ -1127,9 +1144,7 @@ void TopBarWidget::updateControlsGeometry() {
 			button->setCornerRadii(left, right, left, right);
 		}
 	}
-	_forwardAndDelete->moveToLeft(
-		buttonsLeft + _delete->width() + st::topBarActionSkip,
-		selectedButtonsTop);
+	_forwardAndDelete->moveToLeft(buttonsLeft, selectedButtonsTop);
 	_clear->moveToRight(st::topBarActionSkip, selectedButtonsTop);
 
 	if (!_cancelChoose->isHidden()) {
@@ -1240,10 +1255,12 @@ void TopBarWidget::updateControlsVisibility() {
 	const auto visible = showSelectedState() || _selectedShown.animating();
 	_clear->setVisible(visible);
 	_delete->setVisible(_canDelete && visible);
+	_clearFromChat->setVisible(_canClearFromChat && visible);
 	_forward->setVisible(_canForward && visible);
 	_forwardAndDelete->setVisible(_canForward
 		&& _canDelete
-		&& Core::App().settings().fork().thirdButtonTopBar());
+		&& Core::App().settings().fork().thirdButtonTopBar()
+		&& visible);
 	_sendNow->setVisible(_canSendNow && visible);
 
 
@@ -1400,16 +1417,25 @@ void TopBarWidget::updateMembersShowArea() {
 
 bool TopBarWidget::showSelectedState() const {
 	return (_selectedCount > 0)
-		&& (_canDelete || _canForward || _canSendNow);
+		&& (_canDelete || _canClearFromChat || _canForward || _canSendNow);
 }
 
 void TopBarWidget::showSelected(SelectedState state) {
-	auto canDelete = (state.count > 0 && state.count == state.canDeleteCount);
+	auto canDelete = (state.count > 0)
+		&& (state.count == state.canDeleteCount);
+	auto canClearFromChat = (state.count > 0)
+		&& (state.count == state.canRemoveLocallyCount);
 	auto canForward = (state.count > 0 && state.count == state.canForwardCount);
 	auto canSendNow = (state.count > 0 && state.count == state.canSendNowCount);
-	auto count = (!canDelete && !canForward && !canSendNow) ? 0 : state.count;
+	auto count = (!canDelete
+		&& !canClearFromChat
+		&& !canForward
+		&& !canSendNow)
+		? 0
+		: state.count;
 	if (_selectedCount == count
 		&& _canDelete == canDelete
+		&& _canClearFromChat == canClearFromChat
 		&& _canForward == canForward
 		&& _canSendNow == canSendNow) {
 		return;
@@ -1417,16 +1443,19 @@ void TopBarWidget::showSelected(SelectedState state) {
 	if (count == 0) {
 		// Don't change the visible buttons if the selection is cancelled.
 		canDelete = _canDelete;
+		canClearFromChat = _canClearFromChat;
 		canForward = _canForward;
 		canSendNow = _canSendNow;
 	}
 
 	const auto wasSelectedState = showSelectedState();
 	const auto visibilityChanged = (_canDelete != canDelete)
+		|| (_canClearFromChat != canClearFromChat)
 		|| (_canForward != canForward)
 		|| (_canSendNow != canSendNow);
 	_selectedCount = count;
 	_canDelete = canDelete;
+	_canClearFromChat = canClearFromChat;
 	_canForward = canForward;
 	_canSendNow = canSendNow;
 	const auto nowSelectedState = showSelectedState();
@@ -1435,11 +1464,13 @@ void TopBarWidget::showSelected(SelectedState state) {
 		_forwardAndDelete->setNumbersText(_selectedCount);
 		_sendNow->setNumbersText(_selectedCount);
 		_delete->setNumbersText(_selectedCount);
+		_clearFromChat->setNumbersText(_selectedCount);
 		if (!wasSelectedState) {
 			_forward->finishNumbersAnimation();
 			_forwardAndDelete->finishNumbersAnimation();
 			_sendNow->finishNumbersAnimation();
 			_delete->finishNumbersAnimation();
+			_clearFromChat->finishNumbersAnimation();
 		}
 	}
 	if (visibilityChanged

@@ -202,6 +202,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
+#include "styles/style_layers.h"
 
 #include <QtGui/QWindow>
 #include <QtCore/QMimeData>
@@ -1047,6 +1048,10 @@ HistoryWidget::HistoryWidget(
 	_topBar->deleteSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
+	}, _topBar->lifetime());
+	_topBar->clearFromChatSelectionRequest(
+	) | rpl::on_next([=] {
+		confirmClearSelected();
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {
@@ -4353,14 +4358,18 @@ void HistoryWidget::loadMessages() {
 		return;
 	}
 
-	if (_history->isEmpty() && _migrated && _migrated->isEmpty()) {
+	const auto historyHasLoaded = !_history->isEmpty()
+		|| _history->minMsgId();
+	const auto migratedHasLoaded = _migrated
+		&& (!_migrated->isEmpty() || _migrated->minMsgId());
+	if (!historyHasLoaded && _migrated && !migratedHasLoaded) {
 		return firstLoadMessages();
 	}
 
 	auto loadMigrated = _migrated
-		&& (_history->isEmpty()
+		&& (!historyHasLoaded
 			|| _history->loadedAtTop()
-			|| (!_migrated->isEmpty() && !_migrated->loadedAtBottom()));
+			|| (migratedHasLoaded && !_migrated->loadedAtBottom()));
 	const auto from = loadMigrated ? _migrated : _history;
 	if (from->loadedAtTop()) {
 		return;
@@ -4411,14 +4420,18 @@ void HistoryWidget::loadMessagesDown() {
 		return;
 	}
 
-	if (_history->isEmpty() && _migrated && _migrated->isEmpty()) {
+	const auto historyHasLoaded = !_history->isEmpty()
+		|| _history->maxMsgId();
+	const auto migratedHasLoaded = _migrated
+		&& (!_migrated->isEmpty() || _migrated->maxMsgId());
+	if (!historyHasLoaded && _migrated && !migratedHasLoaded) {
 		return firstLoadMessages();
 	}
 
 	const auto loadMigrated = _migrated
-		&& !(_migrated->isEmpty()
+		&& !(!migratedHasLoaded
 			|| _migrated->loadedAtBottom()
-			|| (!_history->isEmpty() && !_history->loadedAtTop()));
+			|| (historyHasLoaded && !_history->loadedAtTop()));
 	const auto from = loadMigrated ? _migrated : _history;
 	if (from->loadedAtBottom()) {
 		if (_sponsoredMessagesStateKnown) {
@@ -9734,6 +9747,39 @@ void HistoryWidget::confirmDeleteSelected() {
 	}
 }
 
+void HistoryWidget::confirmClearSelected() {
+	if (!_list) {
+		return;
+	}
+	const auto ids = getSelectedItemsForLocalClear();
+	if (ids.empty()) {
+		return;
+	}
+	const auto count = int(ids.size());
+	controller()->show(Ui::MakeConfirmBox({
+		.text = (count == 1)
+			? tr::lng_selected_clear_from_chat_sure_this(tr::now)
+			: tr::lng_selected_clear_from_chat_sure(
+				tr::now,
+				lt_count,
+				count),
+		.confirmed = crl::guard(this, [=](Fn<void()> close) {
+			close();
+			for (const auto &id : ids) {
+				if (const auto item = session().data().message(id)) {
+					if (item->canRemoveLocally()) {
+						item->hideLocally();
+					}
+				}
+			}
+			clearSelected();
+		}),
+		.confirmText = tr::lng_selected_clear_from_chat_confirm(tr::now),
+		.cancelText = tr::lng_cancel(tr::now),
+		.confirmStyle = &st::attentionBoxButton,
+	}));
+}
+
 void HistoryWidget::escape() {
 	if (_composeSearch) {
 		if (_nonEmptySelection) {
@@ -9795,6 +9841,12 @@ HistoryItem *HistoryWidget::getItemFromHistoryOrMigrated(
 
 MessageIdsList HistoryWidget::getSelectedItems() const {
 	return _list ? _list->getSelectedItems() : MessageIdsList();
+}
+
+MessageIdsList HistoryWidget::getSelectedItemsForLocalClear() const {
+	return _list
+		? _list->getSelectedItemsForLocalClear()
+		: MessageIdsList();
 }
 
 void HistoryWidget::updateTopBarChooseForReport() {

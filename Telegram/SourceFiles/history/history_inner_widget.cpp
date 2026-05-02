@@ -586,7 +586,9 @@ void HistoryInner::setupSharingDisallowed() {
 	}
 
 	const auto clearIfRestricted = [=] {
-		if (hasSelectRestriction() && !getSelectedItems().empty()) {
+		if (hasSelectRestriction()
+			&& !getSelectedItems().empty()
+			&& getSelectedItemsForLocalClear().empty()) {
 			_widget->clearSelected();
 			if (_mouseAction == MouseAction::PrepareSelect) {
 				mouseActionCancel();
@@ -2081,12 +2083,15 @@ void HistoryInner::mouseActionStart(const QPoint &screenPos, Qt::MouseButton but
 							_selected.emplace(_mouseActionItem, selStatus);
 							_mouseAction = MouseAction::Selecting;
 							repaintItem(_mouseActionItem);
-						} else if (!hasSelectRestriction()) {
+						} else if (!hasSelectRestriction()
+							|| _mouseActionItem->canRemoveLocally()) {
 							_mouseAction = MouseAction::PrepareSelect;
 						}
 					}
 				}
-			} else if (!_pressWasInactive && !hasSelectRestriction()) {
+			} else if (!_pressWasInactive
+				&& (!hasSelectRestriction()
+					|| _mouseActionItem->canRemoveLocally())) {
 				_mouseAction = MouseAction::PrepareSelect; // start items select
 			}
 		}
@@ -2354,17 +2359,20 @@ void HistoryInner::mouseActionFinish(
 			_selected.erase(i);
 			repaintItem(_mouseActionItem);
 		} else if ((i == _selected.cend())
-			&& !_dragStateItem->isService()
-			&& _dragStateItem->isRegular()
+			&& ((_dragStateItem->isRegular()
+					&& !_dragStateItem->isService())
+				|| _dragStateItem->canRemoveLocally())
 			&& inSelectionMode().inSelectionMode) {
 			if (_selected.size() < MaxSelectedItems) {
 				_selected.emplace(_dragStateItem, FullSelection);
 				repaintItem(_mouseActionItem);
 			}
 		} else if (_mouseCursorState == CursorState::Date
-			&& !hasSelectRestriction()
-			&& _dragStateItem->isRegular()
-			&& !_dragStateItem->isService()) {
+			&& (!hasSelectRestriction()
+				|| _dragStateItem->canRemoveLocally())
+			&& ((_dragStateItem->isRegular()
+					&& !_dragStateItem->isService())
+				|| _dragStateItem->canRemoveLocally())) {
 			changeSelectionAsGroup(
 				&_selected,
 				_dragStateItem,
@@ -2961,9 +2969,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				Element::Moused())
 		) != HistoryView::PointState::GroupPart);
 	const auto addSelectMessageAction = [&](not_null<HistoryItem*> item) {
-		if (item->isRegular()
-			&& !item->isService()
-			&& !hasSelectRestriction()) {
+		if (((item->isRegular() && !item->isService())
+				|| item->canRemoveLocally())
+			&& (!hasSelectRestriction() || item->canRemoveLocally())) {
 			const auto itemId = item->fullId();
 			_menu->addAction(tr::lng_context_select_msg(tr::now), [=] {
 				if (const auto item = session->data().message(itemId)) {
@@ -3197,6 +3205,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_widget->confirmDeleteSelected();
 				}, &st::menuIconDelete);
 			}
+			if (selectedState.count > 0
+				&& selectedState.count == selectedState.canRemoveLocallyCount) {
+				_menu->addAction(tr::lng_context_remove_from_chat(tr::now), [=] {
+					_widget->confirmClearSelected();
+				}, &st::menuIconDelete);
+			}
 			if (selectedState.count > 1 && selectedState.count <= 10) {
 				Fork::AddGroupSelected(_menu, groupToSaved);
 			}
@@ -3242,6 +3256,15 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							item->ttlDestroyAt(),
 							[=] { _menu = nullptr; }));
 					}
+				}
+				if (item->canRemoveLocally()) {
+					_menu->addAction(tr::lng_context_remove_from_chat(tr::now), [=] {
+						if (const auto item = session->data().message(itemId)) {
+							if (item->canRemoveLocally()) {
+								item->hideLocally();
+							}
+						}
+					}, &st::menuIconDelete);
 				}
 				if (!blockSender && item->suggestReport()) {
 					_menu->addAction(tr::lng_context_report_msg(tr::now), [=] {
@@ -3486,6 +3509,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_widget->confirmDeleteSelected();
 				}, &st::menuIconDelete);
 			}
+			if (selectedState.count > 0
+				&& selectedState.count == selectedState.canRemoveLocallyCount) {
+				_menu->addAction(tr::lng_context_remove_from_chat(tr::now), [=] {
+					_widget->confirmClearSelected();
+				}, &st::menuIconDelete);
+			}
 			if (selectedState.count > 1 && selectedState.count <= 10) {
 				Fork::AddGroupSelected(_menu, groupToSaved);
 			}
@@ -3498,7 +3527,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu->addAction(tr::lng_context_clear_selection(tr::now), [=] {
 				_widget->clearSelected();
 			}, &st::menuIconSelect);
-		} else if (item && ((isUponSelected != -2 && (canForward || canDelete)) || item->isRegular())) {
+		} else if (item
+			&& ((isUponSelected != -2
+					&& (canForward || canDelete || item->canRemoveLocally()))
+				|| item->isRegular())) {
 			if (isUponSelected != -2) {
 				if (canForward) {
 					_menu->addAction(tr::lng_context_forward_msg(tr::now), [=] {
@@ -3530,6 +3562,15 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							item->ttlDestroyAt(),
 							[=] { _menu = nullptr; }));
 					}
+				}
+				if (item->canRemoveLocally()) {
+					_menu->addAction(tr::lng_context_remove_from_chat(tr::now), [=] {
+						if (const auto item = session->data().message(itemId)) {
+							if (item->canRemoveLocally()) {
+								item->hideLocally();
+							}
+						}
+					}, &st::menuIconDelete);
 				}
 				if (!canBlockSender && canReport) {
 					_menu->addAction(tr::lng_context_report_msg(tr::now), [=] {
@@ -4704,6 +4745,9 @@ auto HistoryInner::getSelectionState() const
 			if (selected.first->canDelete()) {
 				++result.canDeleteCount;
 			}
+			if (selected.first->canRemoveLocally()) {
+				++result.canRemoveLocallyCount;
+			}
 			if (selected.first->allowsForward()) {
 				++result.canForwardCount;
 			}
@@ -4751,6 +4795,31 @@ MessageIdsList HistoryInner::getSelectedItems() const {
 	return result;
 }
 
+MessageIdsList HistoryInner::getSelectedItemsForLocalClear() const {
+	using namespace ranges;
+
+	if (!hasSelectedItems()) {
+		return {};
+	}
+
+	auto result = ranges::make_subrange(
+		_selected.begin(),
+		_selected.end()
+	) | views::filter([](const auto &selected) {
+		const auto item = selected.first;
+		return item && item->canRemoveLocally();
+	}) | views::transform([](const auto &selected) {
+		return selected.first->fullId();
+	}) | to_vector;
+
+	result |= actions::sort(less{}, [](const FullMsgId &msgId) {
+		return peerIsChannel(msgId.peer)
+			? msgId.msg
+			: (msgId.msg - ServerMaxMsgId);
+	});
+	return result;
+}
+
 void HistoryInner::onTouchSelect() {
 	_touchSelect = true;
 	_touchMaybeSelecting = true;
@@ -4784,11 +4853,13 @@ auto HistoryInner::reactionButtonParameters(
 }
 
 auto HistoryInner::replyButtonParameters(
-	not_null<const Element*> view,
-	QPoint position,
-	const HistoryView::TextState &replyState) const
+		not_null<const Element*> view,
+		QPoint position,
+		const HistoryView::TextState &replyState) const
 -> HistoryView::ReplyButton::ButtonParameters {
-	if (!_useCornerReply) {
+	const auto canClear = view->data()->isDeleted()
+		&& view->data()->canRemoveLocally();
+	if (!_useCornerReply && !canClear) {
 		return {};
 	}
 	const auto top = itemTop(view);
@@ -5191,7 +5262,9 @@ void HistoryInner::mouseActionUpdate() {
 void HistoryInner::updateDragSelection(Element *dragSelFrom, Element *dragSelTo, bool dragSelecting) {
 	if (_dragSelFrom == dragSelFrom && _dragSelTo == dragSelTo && _dragSelecting == dragSelecting) {
 		return;
-	} else if (dragSelFrom && hasSelectRestriction()) {
+	} else if (dragSelFrom
+		&& hasSelectRestriction()
+		&& !dragSelFrom->data()->canRemoveLocally()) {
 		updateDragSelection(nullptr, nullptr, false);
 		return;
 	}
@@ -5376,7 +5449,8 @@ void HistoryInner::notifyMigrateUpdated() {
 }
 
 void HistoryInner::applyDragSelection() {
-	if (!hasSelectRestriction()) {
+	if (!hasSelectRestriction()
+		|| (_dragSelFrom && _dragSelFrom->data()->canRemoveLocally())) {
 		applyDragSelection(&_selected);
 	}
 }
@@ -5412,7 +5486,8 @@ bool HistoryInner::goodForSelection(
 		not_null<SelectedItems*> toItems,
 		not_null<HistoryItem*> item,
 		int &totalCount) const {
-	if (!item->isRegular() || item->isService()) {
+	if ((!item->isRegular() || item->isService())
+		&& !item->canRemoveLocally()) {
 		return false;
 	} else if (toItems->find(item) == toItems->end()) {
 		++totalCount;

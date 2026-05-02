@@ -54,6 +54,8 @@ constexpr auto kStickersVersionTag = quint32(-1);
 constexpr auto kStickersSerializeVersion = 4;
 constexpr auto kMaxSavedStickerSetsCount = 1000;
 constexpr auto kDefaultStickerInstallDate = TimeId(1);
+constexpr auto kMessageRevisionsPref = "message-revisions-v1";
+constexpr auto kLocallyHiddenMessagesPref = "locally-hidden-messages-v1";
 
 constexpr auto kSinglePeerTypeUserOld = qint32(1);
 constexpr auto kSinglePeerTypeChatOld = qint32(2);
@@ -3670,6 +3672,30 @@ QByteArray Account::readBotStorage(PeerId botId) {
 		return {};
 	}
 	return result;
+}
+
+void Account::writeMessageRevisions(const QByteArray &serialized) {
+	if (serialized.isEmpty()) {
+		clearPref(kMessageRevisionsPref);
+	} else {
+		writePrefGeneric(kMessageRevisionsPref, serialized);
+	}
+}
+
+QByteArray Account::readMessageRevisions() {
+	return readPrefGeneric(kMessageRevisionsPref).value_or(QByteArray());
+}
+
+void Account::writeLocallyHiddenMessages(const QByteArray &serialized) {
+	if (serialized.isEmpty()) {
+		clearPref(kLocallyHiddenMessagesPref);
+	} else {
+		writePrefGeneric(kLocallyHiddenMessagesPref, serialized);
+	}
+}
+
+QByteArray Account::readLocallyHiddenMessages() {
+	return readPrefGeneric(kLocallyHiddenMessagesPref).value_or(QByteArray());
 }
 
 bool Account::encrypt(

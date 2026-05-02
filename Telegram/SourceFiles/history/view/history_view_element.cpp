@@ -649,7 +649,12 @@ QString DateTooltipText(not_null<Element*> view) {
 	const auto locale = QLocale();
 	const auto format = QLocale::LongFormat;
 	const auto item = view->data();
-	auto dateText = locale.toString(view->dateTime(), format);
+	auto dateText = item->deletedDate()
+		? tr::lng_message_published_date(
+			tr::now,
+			lt_date,
+			locale.toString(view->dateTime(), format))
+		: locale.toString(view->dateTime(), format);
 	if (item->awaitingVideoProcessing()) {
 		dateText += '\n' + tr::lng_approximate_about(tr::now);
 	}
@@ -658,6 +663,12 @@ QString DateTooltipText(not_null<Element*> view) {
 			tr::now,
 			lt_date,
 			locale.toString(base::unixtime::parse(editedDate), format));
+	}
+	if (const auto deletedDate = item->deletedDate()) {
+		dateText += '\n' + tr::lng_message_deleted_date(
+			tr::now,
+			lt_date,
+			locale.toString(base::unixtime::parse(deletedDate), format));
 	}
 	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
 		if (!forwarded->story && forwarded->psaType.isEmpty()) {

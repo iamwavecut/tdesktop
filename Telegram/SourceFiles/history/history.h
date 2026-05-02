@@ -189,7 +189,8 @@ public:
 		bool detachExistingItem = false,
 		bool newMessage = false);
 	std::vector<not_null<HistoryItem*>> createItems(
-		const QVector<MTPMessage> &data);
+		const QVector<MTPMessage> &data,
+		bool *skippedLocallyHidden = nullptr);
 
 	void addOlderSlice(const QVector<MTPMessage> &slice);
 	void addNewerSlice(const QVector<MTPMessage> &slice);
@@ -594,6 +595,7 @@ private:
 
 	void addToSharedMedia(const std::vector<not_null<HistoryItem*>> &items);
 	void addEdgesToSharedMedia();
+	void registerLoadedServerMessage(MsgId id);
 
 	void addItemsToLists(const std::vector<not_null<HistoryItem*>> &items);
 	bool clearUnreadOnClientSide() const;
@@ -642,6 +644,8 @@ private:
 	HistoryItem *_newPeerPhotoChange = nullptr;
 	bool _loadedAtTop = false;
 	bool _loadedAtBottom = true;
+	MsgId _minLoadedServerMsgId = 0;
+	MsgId _maxLoadedServerMsgId = 0;
 
 	std::optional<Data::Folder*> _folder;
 

@@ -372,8 +372,10 @@ void ScheduledMessages::apply(
 					.item = j->second,
 					.sentId = sentId.v,
 				});
+				j->second->destroy();
+			} else {
+				j->second->markDeleted(base::unixtime::now());
 			}
-			j->second->destroy();
 			i = _data.find(history);
 			if (i == end(_data)) {
 				break;
@@ -550,6 +552,7 @@ HistoryItem *ScheduledMessages::append(
 			// so if we receive a flag about it,
 			// probably this message was edited.
 			if (data.is_edit_hide()) {
+				existing->recordEditionSnapshot(message);
 				existing->applyEdition(HistoryMessageEdition(_session, data));
 			} else {
 				existing->updateSentContent({
@@ -579,6 +582,8 @@ HistoryItem *ScheduledMessages::append(
 		NewMessageType::Existing);
 	if (!item || item->history() != history) {
 		LOG(("API Error: Bad data received in scheduled messages."));
+		return nullptr;
+	} else if (item->isLocallyHidden()) {
 		return nullptr;
 	}
 	list.items.emplace_back(item);

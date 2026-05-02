@@ -73,6 +73,7 @@ constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 constexpr auto kMinWidthAppearDuration = crl::time(160);
 constexpr auto kUnreadSummaryBubbleOpacity = 0.7;
+constexpr auto kDeletedMessageOpacity = 0.275;
 
 void ApplyRevealGradient(
 		not_null<const TextAppearing*> appearing,
@@ -1117,6 +1118,11 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 		return;
 	}
 
+	const auto messageOpacity = p.opacity();
+	if (item->isDeleted()) {
+		p.setOpacity(messageOpacity * kDeletedMessageOpacity);
+	}
+
 	const auto entry = logEntryOriginal();
 	const auto check = factcheckBlock();
 	auto mediaDisplayed = media && media->isDisplayed();
@@ -1244,8 +1250,12 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 			fromNameUpdated(g.width());
 		}
 		const auto wasOpacity = p.opacity();
+		auto bubbleOpacity = wasOpacity;
 		if (item->isUnreadSummary()) {
-			p.setOpacity(wasOpacity * kUnreadSummaryBubbleOpacity);
+			bubbleOpacity *= kUnreadSummaryBubbleOpacity;
+		}
+		if (bubbleOpacity != wasOpacity) {
+			p.setOpacity(bubbleOpacity);
 		}
 		Ui::PaintBubble(
 			p,
@@ -1262,7 +1272,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 				},
 				.selection = mediaSelectionIntervals,
 			});
-		if (item->isUnreadSummary()) {
+		if (bubbleOpacity != wasOpacity) {
 			p.setOpacity(wasOpacity);
 		}
 
@@ -1527,6 +1537,9 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	}
 
 	p.restoreTextPalette();
+	if (item->isDeleted()) {
+		p.setOpacity(messageOpacity);
+	}
 
 	if (context.highlightPathCache
 		&& !context.highlightPathCache->isEmpty()) {
@@ -1544,6 +1557,9 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 
 	if (roll) {
 		p.restore();
+	}
+	if (item->isDeleted()) {
+		p.setOpacity(messageOpacity);
 	}
 
 	if (const auto reply = Get<Reply>()) {
@@ -3993,15 +4009,20 @@ ReplyButton::ButtonParameters Message::replyButtonParameters(
 		QPoint position,
 		const TextState &replyState) const {
 	using namespace ReplyButton;
-	if (!displayFastReply() || unwrapped()) {
+	const auto clear = displayFastClear();
+	const auto reply = !clear && displayFastReply();
+	if ((!clear && !reply) || unwrapped()) {
 		return {};
 	}
 	auto result = ButtonParameters{ .context = data()->fullId() };
+	if (clear) {
+		result.text = tr::lng_selected_clear_from_chat(tr::now);
+	}
 	const auto geometry = countGeometry();
 	result.pointer = position;
 	const auto reactionInnerRight = st::reactionCornerCenter.x()
 		+ st::reactionCornerSize.width() / 2;
-	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth();
+	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth(result.text);
 	const auto relativeCenter = QPoint(
 		geometry.width() + reactionInnerRight - replyInnerWidth,
 		st::replyCornerCenter.y());
@@ -4010,7 +4031,7 @@ ReplyButton::ButtonParameters Message::replyButtonParameters(
 		&& !geometry.contains(position)) {
 		result.outside = true;
 	}
-	result.link = fastReplyLink();
+	result.link = clear ? fastClearLink() : fastReplyLink();
 	return result;
 }
 
@@ -4187,6 +4208,9 @@ void Message::refreshDataIdHook() {
 	}
 	if (base::take(_fastReplyLink)) {
 		_fastReplyLink = fastReplyLink();
+	}
+	if (base::take(_fastClearLink)) {
+		_fastClearLink = fastClearLink();
 	}
 	if (_viewButton) {
 		_viewButton = nullptr;
@@ -4537,6 +4561,12 @@ bool Message::displayFastReply() const {
 		&& !delegate()->elementInSelectionMode(this).inSelectionMode;
 }
 
+bool Message::displayFastClear() const {
+	return data()->isDeleted()
+		&& data()->canRemoveLocally()
+		&& !delegate()->elementInSelectionMode(this).inSelectionMode;
+}
+
 bool Message::displayRightActionComments() const {
 	return !isPinnedContext()
 		&& (context() != Context::SavedSublist)
@@ -4829,6 +4859,20 @@ ClickHandlerPtr Message::fastReplyLink() const {
 		delegate()->elementReplyTo({ itemId });
 	}));
 	return _fastReplyLink;
+}
+
+ClickHandlerPtr Message::fastClearLink() const {
+	if (_fastClearLink) {
+		return _fastClearLink;
+	}
+	_fastClearLink = std::make_shared<LambdaClickHandler>(
+		crl::guard(this, [=] {
+			const auto item = data();
+			if (item->canRemoveLocally()) {
+				item->hideLocally();
+			}
+		}));
+	return _fastClearLink;
 }
 
 bool Message::isPinnedContext() const {

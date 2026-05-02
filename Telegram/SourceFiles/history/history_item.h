@@ -17,6 +17,7 @@ class HiddenSenderInfo;
 class History;
 
 struct HistoryMessageReply;
+struct HistoryMessageRevisionHistory;
 struct HistoryMessageViews;
 struct HistoryMessageMarkupData;
 struct HistoryMessageReplyMarkup;
@@ -378,6 +379,16 @@ public:
 	[[nodiscard]] bool needCheck() const;
 
 	[[nodiscard]] bool isService() const;
+	void applyLocalMessageState(const MTPMessage &data);
+	void recordEditionSnapshot(const MTPMessage &data);
+	void markDeleted(TimeId date);
+	void hideLocally();
+	[[nodiscard]] bool isDeleted() const;
+	[[nodiscard]] bool isLocallyHidden() const;
+	[[nodiscard]] bool canRemoveLocally() const;
+	[[nodiscard]] TimeId deletedDate() const;
+	[[nodiscard]] int editCount() const;
+	[[nodiscard]] const HistoryMessageRevisionHistory *revisionHistory() const;
 	void applyEdition(HistoryMessageEdition &&edition);
 	void applyChanges(not_null<Data::Story*> story);
 

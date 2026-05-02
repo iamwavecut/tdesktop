@@ -88,6 +88,7 @@ struct SelectedItem {
 
 	FullMsgId msgId;
 	bool canDelete = false;
+	bool canRemoveLocally = false;
 	bool canForward = false;
 	bool canSendNow = false;
 	bool canReschedule = false;
@@ -248,6 +249,7 @@ private:
 
 struct SelectionData {
 	bool canDelete = false;
+	bool canRemoveLocally = false;
 	bool canForward = false;
 	bool canSendNow = false;
 	bool canReschedule = false;
@@ -923,6 +925,7 @@ private:
 };
 
 void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget);
+void ConfirmClearSelectedItems(not_null<ListWidget*> widget);
 void ConfirmForwardSelectedItems(not_null<ListWidget*> widget);
 void ConfirmSendNowSelectedItems(not_null<ListWidget*> widget);
 

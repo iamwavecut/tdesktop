@@ -16,6 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/chat/message_bubble.h"
 
+#include <QtCore/QByteArray>
+
+#include <vector>
+
 struct WebPageData;
 struct TodoListItem;
 class VoiceSeekClickHandler;
@@ -113,6 +117,29 @@ struct HistoryMessageFromRank
 struct HistoryMessageEdited
 : RuntimeComponent<HistoryMessageEdited, HistoryItem> {
 	TimeId date = 0;
+};
+
+struct HistoryMessageDeleted
+: RuntimeComponent<HistoryMessageDeleted, HistoryItem> {
+	TimeId date = 0;
+};
+
+struct HistoryMessageLocallyHidden
+: RuntimeComponent<HistoryMessageLocallyHidden, HistoryItem> {
+};
+
+struct HistoryMessageRevisionSnapshot {
+	QByteArray raw;
+	QString text;
+	QString media;
+	TimeId date = 0;
+	TimeId editDate = 0;
+	int entitiesCount = 0;
+};
+
+struct HistoryMessageRevisionHistory
+: RuntimeComponent<HistoryMessageRevisionHistory, HistoryItem> {
+	std::vector<HistoryMessageRevisionSnapshot> versions;
 };
 
 class HiddenSenderInfo {

@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "main/main_session.h"
 #include "ui/layers/generic_box.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
@@ -86,6 +87,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_message_reactions.h"
 #include "data/data_peer_values.h"
 #include "styles/style_chat.h"
+#include "styles/style_layers.h"
 #include "styles/style_window.h" // columnMaximalWidthLeft
 
 #include <QtWidgets/QApplication>
@@ -99,6 +101,7 @@ constexpr auto kPreloadIfLessThanScreens = 2;
 constexpr auto kPreloadedScreensCountFull
 	= kPreloadedScreensCount + 1 + kPreloadedScreensCount;
 constexpr auto kClearUserpicsAfter = 50;
+constexpr auto kDeletedMessageOpacity = 0.275;
 
 [[nodiscard]] std::unique_ptr<TranslateTracker> MaybeTranslateTracker(
 		History *history) {
@@ -352,6 +355,7 @@ void ListWidget::enumerateUserpics(Method method) {
 	// Find and remember the top of an attached messages pack
 	// -1 means we didn't find an attached to next message yet.
 	int lowestAttachedItemTop = -1;
+	auto attachedPackDeleted = false;
 
 	auto userpicCallback = [&](not_null<Element*> view, int itemtop, int itembottom) {
 		// Skip all service messages.
@@ -361,6 +365,14 @@ void ListWidget::enumerateUserpics(Method method) {
 
 		if (lowestAttachedItemTop < 0 && view->isAttachedToNext()) {
 			lowestAttachedItemTop = itemtop + view->marginTop();
+			attachedPackDeleted = false;
+		}
+		attachedPackDeleted = attachedPackDeleted
+			|| view->data()->isDeleted();
+
+		const auto userpicDeleted = attachedPackDeleted;
+		if (!view->isAttachedToNext()) {
+			attachedPackDeleted = false;
 		}
 
 		// Call method on a userpic for all messages that have it and for those who are not showing it
@@ -378,7 +390,7 @@ void ListWidget::enumerateUserpics(Method method) {
 
 			// Call the template callback function that was passed
 			// and return if it finished everything it needed.
-			if (!method(view, userpicBottom - st::msgPhotoSize)) {
+			if (!method(view, userpicBottom - st::msgPhotoSize, userpicDeleted)) {
 				return false;
 			}
 		}
@@ -1297,6 +1309,7 @@ auto ListWidget::collectSelectedItems() const -> SelectedItems {
 		const auto &[itemId, selection] = item;
 		auto result = SelectedItem(itemId);
 		result.canDelete = selection.canDelete;
+		result.canRemoveLocally = selection.canRemoveLocally;
 		result.canForward = selection.canForward;
 		result.canSendNow = selection.canSendNow;
 		result.canReschedule = selection.canReschedule;
@@ -1435,6 +1448,7 @@ bool ListWidget::addToSelection(
 		return false;
 	}
 	iterator->second.canDelete = item->canDelete();
+	iterator->second.canRemoveLocally = item->canRemoveLocally();
 	iterator->second.canForward = item->allowsForward();
 	iterator->second.canSendNow = item->allowsSendNow();
 	iterator->second.canReschedule = item->allowsReschedule();
@@ -2569,7 +2583,10 @@ void ListWidget::paintUserpics(
 		return;
 	}
 	const auto session = &this->session();
-	enumerateUserpics([&](not_null<Element*> view, int userpicTop) {
+	enumerateUserpics([&](
+			not_null<Element*> view,
+			int userpicTop,
+			bool userpicDeleted) {
 		// stop the enumeration if the userpic is below the painted rect
 		if (userpicTop >= clip.top() + clip.height()) {
 			return false;
@@ -2591,6 +2608,10 @@ void ListWidget::paintUserpics(
 						st::msgPhotoSize
 							- context.gestureHorizontal.translation,
 						st::msgPhotoSize));
+			}
+			const auto userpicOpacity = p.opacity();
+			if (userpicDeleted) {
+				p.setOpacity(userpicOpacity * kDeletedMessageOpacity);
 			}
 			if (const auto from = item->displayFrom()) {
 				from->paintUserpicLeft(
@@ -2623,6 +2644,9 @@ void ListWidget::paintUserpics(
 				}
 			} else {
 				Unexpected("Corrupt forwarded information in message.");
+			}
+			if (userpicDeleted) {
+				p.setOpacity(userpicOpacity);
 			}
 			if (hasTranslation) {
 				p.translate(-context.gestureHorizontal.translation, 0);
@@ -3817,7 +3841,9 @@ ReplyButton::ButtonParameters ListWidget::replyButtonParameters(
 		not_null<const Element*> view,
 		QPoint position,
 		const TextState &replyState) const {
-	if (!_useCornerReply) {
+	const auto canClear = view->data()->isDeleted()
+		&& view->data()->canRemoveLocally();
+	if (!_useCornerReply && !canClear) {
 		return {};
 	}
 	const auto top = itemTop(view);
@@ -4139,7 +4165,10 @@ void ListWidget::mouseActionUpdate() {
 				&& itemPoint.x() >= st::historyPhotoLeft
 				&& itemPoint.x() < st::historyPhotoLeft + st::msgPhotoSize) {
 				if (view->hasFromPhoto()) {
-					enumerateUserpics([&](not_null<Element*> view, int userpicTop) {
+					enumerateUserpics([&](
+							not_null<Element*> view,
+							int userpicTop,
+							bool) {
 						// stop enumeration if the userpic is below our point
 						if (userpicTop > point.y()) {
 							return false;
@@ -4789,7 +4818,9 @@ void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget) {
 	const auto owner = &controller->session().data();
 	auto historyItems = std::vector<not_null<HistoryItem*>>();
 	historyItems.reserve(items.size());
+	auto canDeleteAll = true;
 	for (const auto &item : items) {
+		canDeleteAll &= item.canDelete;
 		if (!item.canDelete) {
 			return;
 		} else if (const auto i = owner->message(item.msgId)) {
@@ -4799,17 +4830,59 @@ void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget) {
 	const auto confirmed = crl::guard(widget, [=] {
 		widget->cancelSelection();
 	});
-	if (CanCreateModerateMessagesBox(historyItems)) {
-		const auto opt = DefaultModerateMessagesBoxOptions();
-		controller->show(
-			Box(CreateModerateMessagesBox, historyItems, confirmed, opt));
-	} else {
-		auto box = Box<DeleteMessagesBox>(
-			&widget->session(),
-			widget->getSelectedIds());
-		box->setDeleteConfirmedCallback(confirmed);
-		controller->show(std::move(box));
+	if (canDeleteAll) {
+		if (CanCreateModerateMessagesBox(historyItems)) {
+			const auto opt = DefaultModerateMessagesBoxOptions();
+			controller->show(
+				Box(CreateModerateMessagesBox, historyItems, confirmed, opt));
+		} else {
+			auto box = Box<DeleteMessagesBox>(
+				&widget->session(),
+				widget->getSelectedIds());
+			box->setDeleteConfirmedCallback(confirmed);
+			controller->show(std::move(box));
+		}
 	}
+}
+
+void ConfirmClearSelectedItems(not_null<ListWidget*> widget) {
+	const auto items = widget->getSelectedItems();
+	if (items.empty()) {
+		return;
+	}
+	const auto controller = widget->controller();
+	const auto owner = &controller->session().data();
+	const auto count = int(ranges::count_if(
+		items,
+		[&](const SelectedItem &selected) {
+			const auto item = owner->message(selected.msgId);
+			return item && item->canRemoveLocally();
+		}));
+	if (count != int(items.size())) {
+		return;
+	}
+	controller->show(Ui::MakeConfirmBox({
+		.text = (count == 1)
+			? tr::lng_selected_clear_from_chat_sure_this(tr::now)
+			: tr::lng_selected_clear_from_chat_sure(
+				tr::now,
+				lt_count,
+				count),
+		.confirmed = crl::guard(widget, [=](Fn<void()> close) {
+			close();
+			for (const auto &selected : items) {
+				if (const auto item = owner->message(selected.msgId)) {
+					if (item->canRemoveLocally()) {
+						item->hideLocally();
+					}
+				}
+			}
+			widget->cancelSelection();
+		}),
+		.confirmText = tr::lng_selected_clear_from_chat_confirm(tr::now),
+		.cancelText = tr::lng_cancel(tr::now),
+		.confirmStyle = &st::attentionBoxButton,
+	}));
 }
 
 void ConfirmForwardSelectedItems(not_null<ListWidget*> widget) {

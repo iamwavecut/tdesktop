@@ -202,6 +202,10 @@ ScheduledWidget::ScheduledWidget(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
 	}, _topBar->lifetime());
+	_topBar->clearFromChatSelectionRequest(
+	) | rpl::on_next([=] {
+		confirmClearSelected();
+	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {
 		clearSelected();
@@ -1463,6 +1467,9 @@ void ScheduledWidget::listSelectionChanged(SelectedItems &&items) {
 		if (item.canDelete) {
 			++state.canDeleteCount;
 		}
+		if (item.canRemoveLocally) {
+			++state.canRemoveLocallyCount;
+		}
 		if (item.canSendNow) {
 			++state.canSendNowCount;
 		}
@@ -1683,6 +1690,10 @@ void ScheduledWidget::confirmSendNowSelected() {
 
 void ScheduledWidget::confirmDeleteSelected() {
 	ConfirmDeleteSelectedItems(_inner);
+}
+
+void ScheduledWidget::confirmClearSelected() {
+	ConfirmClearSelectedItems(_inner);
 }
 
 void ScheduledWidget::clearSelected() {

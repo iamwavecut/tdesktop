@@ -349,7 +349,7 @@ void ShortcutMessages::apply(
 		const auto &list = i->second;
 		const auto j = list.itemById.find(id.v);
 		if (j != end(list.itemById)) {
-			j->second->destroy();
+			j->second->markDeleted(base::unixtime::now());
 			i = _data.find(shortcutId);
 			if (i == end(_data)) {
 				break;
@@ -661,6 +661,7 @@ HistoryItem *ShortcutMessages::append(
 		const auto existing = i->second;
 		message.match([&](const MTPDmessage &data) {
 			if (data.is_edit_hide()) {
+				existing->recordEditionSnapshot(message);
 				existing->applyEdition(HistoryMessageEdition(_session, data));
 			} else {
 				existing->updateSentContent({
@@ -692,6 +693,8 @@ HistoryItem *ShortcutMessages::append(
 		|| item->history() != _history
 		|| item->shortcutId() != shortcutId) {
 		LOG(("API Error: Bad data received in quick reply messages."));
+		return nullptr;
+	} else if (item->isLocallyHidden()) {
 		return nullptr;
 	}
 	list.items.emplace_back(item);

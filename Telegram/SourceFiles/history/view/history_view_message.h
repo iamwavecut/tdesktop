@@ -358,6 +358,7 @@ private:
 	[[nodiscard]] bool invertMedia() const;
 	[[nodiscard]] bool hasFastReply() const;
 	[[nodiscard]] bool displayFastReply() const;
+	[[nodiscard]] bool displayFastClear() const;
 
 	[[nodiscard]] bool isPinnedContext() const;
 	[[nodiscard]] bool isCommentsRootView() const;
@@ -365,6 +366,7 @@ private:
 	[[nodiscard]] bool displayFastShare() const;
 	[[nodiscard]] bool displayGoToOriginal() const;
 	[[nodiscard]] ClickHandlerPtr fastReplyLink() const;
+	[[nodiscard]] ClickHandlerPtr fastClearLink() const;
 	[[nodiscard]] ClickHandlerPtr prepareRightActionLink() const;
 
 	void ensureRightAction() const;
@@ -412,6 +414,7 @@ private:
 
 	mutable std::unique_ptr<RightAction> _rightAction;
 	mutable ClickHandlerPtr _fastReplyLink;
+	mutable ClickHandlerPtr _fastClearLink;
 	mutable std::unique_ptr<ViewButton> _viewButton;
 	std::unique_ptr<TopicButton> _topicButton;
 	mutable std::unique_ptr<LinkRipple> _linkRipple;

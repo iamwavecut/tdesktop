@@ -155,6 +155,10 @@ PinnedWidget::PinnedWidget(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
 	}, _topBar->lifetime());
+	_topBar->clearFromChatSelectionRequest(
+	) | rpl::on_next([=] {
+		confirmClearSelected();
+	}, _topBar->lifetime());
 	_topBar->forwardSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmForwardSelected();
@@ -683,7 +687,8 @@ bool PinnedWidget::listAllowsMultiSelect() {
 
 bool PinnedWidget::listIsItemGoodForSelection(
 		not_null<HistoryItem*> item) {
-	return item->isRegular() && !item->isService();
+	return (item->isRegular() && !item->isService())
+		|| item->canRemoveLocally();
 }
 
 bool PinnedWidget::listIsLessInOrder(
@@ -698,6 +703,9 @@ void PinnedWidget::listSelectionChanged(SelectedItems &&items) {
 	for (const auto &item : items) {
 		if (item.canDelete) {
 			++state.canDeleteCount;
+		}
+		if (item.canRemoveLocally) {
+			++state.canRemoveLocallyCount;
 		}
 		if (item.canForward) {
 			++state.canForwardCount;
@@ -841,6 +849,10 @@ bool PinnedWidget::listThanosEffectEnabled() const {
 
 void PinnedWidget::confirmDeleteSelected() {
 	ConfirmDeleteSelectedItems(_inner);
+}
+
+void PinnedWidget::confirmClearSelected() {
+	ConfirmClearSelectedItems(_inner);
 }
 
 void PinnedWidget::confirmForwardSelected() {

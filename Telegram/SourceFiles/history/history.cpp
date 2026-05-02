@@ -508,6 +508,7 @@ not_null<HistoryItem*> History::createItem(
 		bool newMessage) {
 	owner().fillMessagePeers(peer->id, message);
 	if (const auto result = owner().message(peer, id)) {
+		registerLoadedServerMessage(id);
 		if (detachExistingItem) {
 			result->removeMainView();
 		}
@@ -519,7 +520,12 @@ not_null<HistoryItem*> History::createItem(
 	const auto result = message.match([&](const auto &data) {
 		return makeMessage(id, data, localFlags);
 	});
-	if (newMessage && result->out() && result->isRegular()) {
+	result->applyLocalMessageState(message);
+	registerLoadedServerMessage(id);
+	if (newMessage
+		&& !result->isLocallyHidden()
+		&& result->out()
+		&& result->isRegular()) {
 		session().topPeers().increment(peer, result->date());
 		if (result->starsPaid()) {
 			session().credits().load(true);
@@ -529,7 +535,8 @@ not_null<HistoryItem*> History::createItem(
 }
 
 std::vector<not_null<HistoryItem*>> History::createItems(
-		const QVector<MTPMessage> &data) {
+		const QVector<MTPMessage> &data,
+		bool *skippedLocallyHidden) {
 	auto result = std::vector<not_null<HistoryItem*>>();
 	result.reserve(data.size());
 	const auto localFlags = MessageFlags();
@@ -543,11 +550,18 @@ std::vector<not_null<HistoryItem*>> History::createItems(
 			// the first message comes empty and is displayed incorrectly.
 			continue;
 		}
-		result.emplace_back(createItem(
+		const auto item = createItem(
 			id,
 			data,
 			localFlags,
-			detachExistingItem));
+			detachExistingItem);
+		if (item->isLocallyHidden()) {
+			if (skippedLocallyHidden) {
+				*skippedLocallyHidden = true;
+			}
+		} else {
+			result.emplace_back(item);
+		}
 	}
 	return result;
 }
@@ -728,7 +742,9 @@ void History::unpinMessagesFor(MsgId topicRootId, PeerId monoforumPeerId) {
 not_null<HistoryItem*> History::addNewItem(
 		not_null<HistoryItem*> item,
 		bool unread) {
-	if (item->isScheduled()) {
+	if (item->isLocallyHidden()) {
+		return item;
+	} else if (item->isScheduled()) {
 		session().scheduledMessages().appendSending(item);
 		return item;
 	} else if (item->isBusinessShortcut()) {
@@ -1721,6 +1737,18 @@ void History::addEdgesToSharedMedia() {
 	}
 }
 
+void History::registerLoadedServerMessage(MsgId id) {
+	if (!IsServerMsgId(id)) {
+		return;
+	}
+	if (!_minLoadedServerMsgId || id < _minLoadedServerMsgId) {
+		_minLoadedServerMsgId = id;
+	}
+	if (!_maxLoadedServerMsgId || id > _maxLoadedServerMsgId) {
+		_maxLoadedServerMsgId = id;
+	}
+}
+
 void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 	if (slice.isEmpty()) {
 		_loadedAtTop = true;
@@ -1728,9 +1756,11 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 		return;
 	}
 
-	if (const auto added = createItems(slice); !added.empty()) {
+	auto skippedLocallyHidden = false;
+	const auto added = createItems(slice, &skippedLocallyHidden);
+	if (!added.empty()) {
 		addCreatedOlderSlice(added);
-	} else {
+	} else if (!skippedLocallyHidden) {
 		// If no items were added it means we've loaded everything old.
 		_loadedAtTop = true;
 		addEdgesToSharedMedia();
@@ -1770,7 +1800,9 @@ void History::addNewerSlice(const QVector<MTPMessage> &slice) {
 		}
 	}
 
-	if (const auto added = createItems(slice); !added.empty()) {
+	auto skippedLocallyHidden = false;
+	const auto added = createItems(slice, &skippedLocallyHidden);
+	if (!added.empty()) {
 		Assert(!isBuildingFrontBlock());
 
 		for (const auto &item : added) {
@@ -1778,7 +1810,7 @@ void History::addNewerSlice(const QVector<MTPMessage> &slice) {
 		}
 
 		addToSharedMedia(added);
-	} else {
+	} else if (!skippedLocallyHidden) {
 		_loadedAtBottom = true;
 		setLastMessage(lastAvailableMessage());
 		addEdgesToSharedMedia();
@@ -3524,27 +3556,45 @@ void History::setOutboxReadTill(MsgId upTo) {
 }
 
 MsgId History::minMsgId() const {
+	auto result = MsgId();
 	for (const auto &block : blocks) {
 		for (const auto &message : block->messages) {
 			const auto item = message->data();
 			if (item->isRegular()) {
-				return item->id;
+				result = item->id;
+				break;
 			}
 		}
+		if (result) {
+			break;
+		}
 	}
-	return 0;
+	if (_minLoadedServerMsgId
+		&& (!result || _minLoadedServerMsgId < result)) {
+		result = _minLoadedServerMsgId;
+	}
+	return result;
 }
 
 MsgId History::maxMsgId() const {
+	auto result = MsgId();
 	for (const auto &block : ranges::views::reverse(blocks)) {
 		for (const auto &message : ranges::views::reverse(block->messages)) {
 			const auto item = message->data();
 			if (item->isRegular()) {
-				return item->id;
+				result = item->id;
+				break;
 			}
 		}
+		if (result) {
+			break;
+		}
 	}
-	return 0;
+	if (_maxLoadedServerMsgId
+		&& (!result || _maxLoadedServerMsgId > result)) {
+		result = _maxLoadedServerMsgId;
+	}
+	return result;
 }
 
 MsgId History::msgIdForRead() const {
@@ -4139,6 +4189,8 @@ void History::clear(ClearType type, bool markEmpty) {
 	_firstUnreadView = nullptr;
 	removeJoinedMessage();
 	base::take(_streamedDrafts);
+	_minLoadedServerMsgId = 0;
+	_maxLoadedServerMsgId = 0;
 
 	forgetScrollState();
 	blocks.clear();
@@ -4200,6 +4252,11 @@ void History::clear(ClearType type, bool markEmpty) {
 }
 
 void History::clearUpTill(MsgId availableMinId) {
+	if (_minLoadedServerMsgId
+		&& availableMinId
+		&& _minLoadedServerMsgId < availableMinId) {
+		_minLoadedServerMsgId = availableMinId;
+	}
 	auto remove = std::vector<not_null<HistoryItem*>>();
 	remove.reserve(_items.size());
 	for (const auto &item : _items) {

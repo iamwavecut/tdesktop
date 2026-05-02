@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "settings/settings_credits_graphics.h" // ShowRefundInfoBox.
 #include "storage/file_upload.h"
+#include "storage/storage_account.h"
 #include "storage/storage_shared_media.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
@@ -73,12 +74,334 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_notifications_manager.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
+#include <QtCore/QDataStream>
+#include <QtCore/QIODevice>
+
 namespace {
 
 constexpr auto kNotificationTextLimit = 255;
 constexpr auto kPinnedMessageTextLimit = 16;
+constexpr auto kRevisionStoreVersion = qint32(1);
+constexpr auto kLocallyHiddenStoreVersion = qint32(1);
 
 using ItemPreview = HistoryView::ItemPreview;
+
+struct StoredMessageRevisionEntry {
+	std::vector<HistoryMessageRevisionSnapshot> versions;
+	TimeId deletedDate = 0;
+};
+
+using StoredMessageRevisionMap = base::flat_map<
+	FullMsgId,
+	StoredMessageRevisionEntry>;
+
+[[nodiscard]] QByteArray SerializeMtpMessage(const MTPMessage &message) {
+	auto buffer = mtpBuffer();
+	message.write(buffer);
+	return QByteArray(
+		reinterpret_cast<const char*>(buffer.constData()),
+		buffer.size() * int(sizeof(mtpPrime)));
+}
+
+[[nodiscard]] QString MediaRevisionLabel(const MTPMessageMedia *media) {
+	if (!media) {
+		return QString();
+	}
+	switch (media->type()) {
+	case mtpc_messageMediaEmpty: return u"empty"_q;
+	case mtpc_messageMediaPhoto: return u"photo"_q;
+	case mtpc_messageMediaGeo: return u"location"_q;
+	case mtpc_messageMediaContact: return u"contact"_q;
+	case mtpc_messageMediaDocument: return u"document"_q;
+	case mtpc_messageMediaWebPage: return u"web page"_q;
+	case mtpc_messageMediaVenue: return u"venue"_q;
+	case mtpc_messageMediaGame: return u"game"_q;
+	case mtpc_messageMediaInvoice: return u"invoice"_q;
+	case mtpc_messageMediaGeoLive: return u"live location"_q;
+	case mtpc_messageMediaPoll: return u"poll"_q;
+	case mtpc_messageMediaDice: return u"dice"_q;
+	case mtpc_messageMediaStory: return u"story"_q;
+	case mtpc_messageMediaGiveaway: return u"giveaway"_q;
+	case mtpc_messageMediaGiveawayResults: return u"giveaway results"_q;
+	case mtpc_messageMediaPaidMedia: return u"paid media"_q;
+	case mtpc_messageMediaToDo: return u"to-do"_q;
+	case mtpc_messageMediaVideoStream: return u"video stream"_q;
+	}
+	return u"media"_q;
+}
+
+[[nodiscard]] QString ServiceRevisionLabel(const MTPMessageAction &action) {
+	switch (action.type()) {
+	case mtpc_messageActionEmpty: return QString();
+	case mtpc_messageActionChatCreate: return u"chat created"_q;
+	case mtpc_messageActionChatEditTitle: return u"title changed"_q;
+	case mtpc_messageActionChatEditPhoto: return u"photo changed"_q;
+	case mtpc_messageActionChatDeletePhoto: return u"photo removed"_q;
+	case mtpc_messageActionChatAddUser: return u"user added"_q;
+	case mtpc_messageActionChatDeleteUser: return u"user removed"_q;
+	case mtpc_messageActionChatJoinedByLink: return u"joined by link"_q;
+	case mtpc_messageActionChannelCreate: return u"channel created"_q;
+	default: return u"service action"_q;
+	}
+}
+
+[[nodiscard]] HistoryMessageRevisionSnapshot SnapshotFromMtp(
+		const MTPMessage &message) {
+	auto result = HistoryMessageRevisionSnapshot();
+	result.raw = SerializeMtpMessage(message);
+	message.match([&](const MTPDmessageEmpty &) {
+	}, [&](const MTPDmessageService &data) {
+		result.date = data.vdate().v;
+		result.media = ServiceRevisionLabel(data.vaction());
+	}, [&](const MTPDmessage &data) {
+		result.date = data.vdate().v;
+		result.editDate = data.vedit_date().value_or_empty();
+		result.text = qs(data.vmessage());
+		result.entitiesCount = data.ventities()
+			? int(data.ventities()->v.size())
+			: 0;
+		result.media = MediaRevisionLabel(data.vmedia());
+	});
+	return result;
+}
+
+[[nodiscard]] HistoryMessageRevisionSnapshot SnapshotFromItem(
+		not_null<const HistoryItem*> item) {
+	auto result = HistoryMessageRevisionSnapshot();
+	result.date = item->date();
+	if (const auto edited = item->Get<HistoryMessageEdited>()) {
+		result.editDate = edited->date;
+	}
+	result.text = item->originalText().text;
+	if (item->media()) {
+		result.media = u"media"_q;
+	}
+	return result;
+}
+
+[[nodiscard]] bool SameRevision(
+		const HistoryMessageRevisionSnapshot &a,
+		const HistoryMessageRevisionSnapshot &b) {
+	if (!a.raw.isEmpty() && !b.raw.isEmpty()) {
+		return a.raw == b.raw;
+	}
+	return a.text == b.text
+		&& a.media == b.media
+		&& a.entitiesCount == b.entitiesCount
+		&& a.editDate == b.editDate;
+}
+
+[[nodiscard]] StoredMessageRevisionMap ReadRevisionStore(
+		Storage::Account &local) {
+	const auto bytes = local.readMessageRevisions();
+	if (bytes.isEmpty()) {
+		return {};
+	}
+	auto stream = QDataStream(bytes);
+	stream.setVersion(QDataStream::Qt_5_1);
+	auto version = qint32();
+	auto count = qint32();
+	stream >> version >> count;
+	if (version != kRevisionStoreVersion || count < 0) {
+		return {};
+	}
+	auto result = StoredMessageRevisionMap();
+	for (auto i = 0; i != count; ++i) {
+		auto peerSerialized = quint64();
+		auto msg = qint64();
+		auto deletedDate = qint32();
+		auto versionsCount = qint32();
+		stream >> peerSerialized >> msg >> deletedDate >> versionsCount;
+		if (versionsCount < 0) {
+			return {};
+		}
+		auto entry = StoredMessageRevisionEntry();
+		entry.deletedDate = deletedDate;
+		entry.versions.reserve(versionsCount);
+		for (auto j = 0; j != versionsCount; ++j) {
+			auto snapshot = HistoryMessageRevisionSnapshot();
+			auto date = qint32();
+			auto editDate = qint32();
+			auto entitiesCount = qint32();
+			stream
+				>> date
+				>> editDate
+				>> entitiesCount
+				>> snapshot.raw
+				>> snapshot.text
+				>> snapshot.media;
+			snapshot.date = date;
+			snapshot.editDate = editDate;
+			snapshot.entitiesCount = entitiesCount;
+			entry.versions.push_back(std::move(snapshot));
+		}
+		result.emplace(
+			FullMsgId(DeserializePeerId(peerSerialized), MsgId(msg)),
+			std::move(entry));
+	}
+	return (stream.status() == QDataStream::Ok) ? result : StoredMessageRevisionMap();
+}
+
+void WriteRevisionStore(
+		Storage::Account &local,
+		const StoredMessageRevisionMap &entries) {
+	if (entries.empty()) {
+		local.writeMessageRevisions({});
+		return;
+	}
+	auto bytes = QByteArray();
+	auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
+	stream.setVersion(QDataStream::Qt_5_1);
+	stream << kRevisionStoreVersion << qint32(entries.size());
+	for (const auto &[id, entry] : entries) {
+		stream
+			<< SerializePeerId(id.peer)
+			<< qint64(id.msg.bare)
+			<< qint32(entry.deletedDate)
+			<< qint32(entry.versions.size());
+		for (const auto &snapshot : entry.versions) {
+			stream
+				<< qint32(snapshot.date)
+				<< qint32(snapshot.editDate)
+				<< qint32(snapshot.entitiesCount)
+				<< snapshot.raw
+				<< snapshot.text
+				<< snapshot.media;
+		}
+	}
+	local.writeMessageRevisions(bytes);
+}
+
+[[nodiscard]] base::flat_set<FullMsgId> ReadHiddenStore(
+		Storage::Account &local) {
+	const auto bytes = local.readLocallyHiddenMessages();
+	if (bytes.isEmpty()) {
+		return {};
+	}
+	auto stream = QDataStream(bytes);
+	stream.setVersion(QDataStream::Qt_5_1);
+	auto version = qint32();
+	auto count = qint32();
+	stream >> version >> count;
+	if (version != kLocallyHiddenStoreVersion || count < 0) {
+		return {};
+	}
+	auto result = base::flat_set<FullMsgId>();
+	for (auto i = 0; i != count; ++i) {
+		auto peerSerialized = quint64();
+		auto msg = qint64();
+		stream >> peerSerialized >> msg;
+		result.emplace(FullMsgId(DeserializePeerId(peerSerialized), MsgId(msg)));
+	}
+	return (stream.status() == QDataStream::Ok)
+		? result
+		: base::flat_set<FullMsgId>();
+}
+
+void WriteHiddenStore(
+		Storage::Account &local,
+		const base::flat_set<FullMsgId> &hidden) {
+	if (hidden.empty()) {
+		local.writeLocallyHiddenMessages({});
+		return;
+	}
+	auto bytes = QByteArray();
+	auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
+	stream.setVersion(QDataStream::Qt_5_1);
+	stream << kLocallyHiddenStoreVersion << qint32(hidden.size());
+	for (const auto &id : hidden) {
+		stream << SerializePeerId(id.peer) << qint64(id.msg.bare);
+	}
+	local.writeLocallyHiddenMessages(bytes);
+}
+
+struct MessageLocalStateCache {
+	Storage::Account *local = nullptr;
+	StoredMessageRevisionMap revisions;
+	base::flat_set<FullMsgId> hidden;
+	bool revisionsLoaded = false;
+	bool hiddenLoaded = false;
+	bool revisionsWriteScheduled = false;
+};
+
+MessageLocalStateCache &MessageLocalState() {
+	static auto result = MessageLocalStateCache();
+	return result;
+}
+
+void SwitchMessageLocalState(Storage::Account &local) {
+	auto &cache = MessageLocalState();
+	if (cache.local == &local) {
+		return;
+	}
+	if (cache.local
+		&& cache.revisionsLoaded
+		&& cache.revisionsWriteScheduled) {
+		WriteRevisionStore(*cache.local, cache.revisions);
+	}
+	cache = MessageLocalStateCache();
+	cache.local = &local;
+}
+
+StoredMessageRevisionMap &RevisionStore(Storage::Account &local) {
+	SwitchMessageLocalState(local);
+	auto &cache = MessageLocalState();
+	if (!cache.revisionsLoaded) {
+		cache.revisions = ReadRevisionStore(local);
+		cache.revisionsLoaded = true;
+	}
+	return cache.revisions;
+}
+
+base::flat_set<FullMsgId> &HiddenStore(Storage::Account &local) {
+	SwitchMessageLocalState(local);
+	auto &cache = MessageLocalState();
+	if (!cache.hiddenLoaded) {
+		cache.hidden = ReadHiddenStore(local);
+		cache.hiddenLoaded = true;
+	}
+	return cache.hidden;
+}
+
+void FlushRevisionStore(Storage::Account &local) {
+	SwitchMessageLocalState(local);
+	auto &cache = MessageLocalState();
+	if (!cache.revisionsLoaded) {
+		return;
+	}
+	cache.revisionsWriteScheduled = false;
+	WriteRevisionStore(local, cache.revisions);
+}
+
+void ScheduleRevisionStoreWrite(
+		Main::Session *session,
+		Storage::Account &local) {
+	SwitchMessageLocalState(local);
+	auto &cache = MessageLocalState();
+	if (!cache.revisionsLoaded || cache.revisionsWriteScheduled) {
+		return;
+	}
+	cache.revisionsWriteScheduled = true;
+	crl::on_main(session, [local = &local] {
+		auto &cache = MessageLocalState();
+		if (cache.local != local
+			|| !cache.revisionsLoaded
+			|| !cache.revisionsWriteScheduled) {
+			return;
+		}
+		cache.revisionsWriteScheduled = false;
+		WriteRevisionStore(*local, cache.revisions);
+	});
+}
+
+void FlushHiddenStore(Storage::Account &local) {
+	SwitchMessageLocalState(local);
+	auto &cache = MessageLocalState();
+	if (!cache.hiddenLoaded) {
+		return;
+	}
+	WriteHiddenStore(local, cache.hidden);
+}
 
 template <typename T>
 [[nodiscard]] PreparedServiceText PrepareEmptyText(const T &) {
@@ -554,7 +877,11 @@ HistoryItem::HistoryItem(
 	MessageFlags localFlags)
 : HistoryItem(
 	history,
-	{ .id = id, .flags = localFlags },
+	{
+		.id = id,
+		.flags = localFlags
+			| (IsServerMsgId(id) ? MessageFlag::HistoryEntry : MessageFlag()),
+	},
 	PreparedServiceText{ tr::lng_message_empty(
 		tr::now,
 		tr::marked) }) {
@@ -2788,7 +3115,7 @@ void HistoryItem::setRealId(MsgId newId) {
 }
 
 bool HistoryItem::canPin() const {
-	if (!isRegular() || isService()) {
+	if (isDeleted() || isLocallyHidden() || !isRegular() || isService()) {
 		return false;
 	} else if (const auto m = media(); m && m->call()) {
 		return false;
@@ -2797,7 +3124,9 @@ bool HistoryItem::canPin() const {
 }
 
 bool HistoryItem::allowsSendNow() const {
-	return !isService()
+	return !isDeleted()
+		&& !isLocallyHidden()
+		&& !isService()
 		&& isScheduled()
 		&& !isSending()
 		&& !hasFailed()
@@ -2810,7 +3139,9 @@ bool HistoryItem::allowsReschedule() const {
 }
 
 bool HistoryItem::allowsForward() const {
-	return !isService()
+	return !isDeleted()
+		&& !isLocallyHidden()
+		&& !isService()
 		&& isRegular()
 		&& !forbidsForward()
 		&& history()->peer->allowsForwarding()
@@ -2839,7 +3170,9 @@ bool HistoryItem::allowsEditMedia() const {
 }
 
 bool HistoryItem::canBeEdited() const {
-	if ((!isRegular() && !isScheduled() && !isBusinessShortcut())
+	if (isDeleted()
+		|| isLocallyHidden()
+		|| (!isRegular() && !isScheduled() && !isBusinessShortcut())
 		|| Has<HistoryMessageVia>()
 		|| Has<HistoryMessageForwarded>()) {
 		return false;
@@ -2884,7 +3217,9 @@ bool HistoryItem::forbidsSaving() const {
 }
 
 bool HistoryItem::canDelete() const {
-	if (isSponsored()) {
+	if (isDeleted() || isLocallyHidden()) {
+		return false;
+	} else if (isSponsored()) {
 		return false;
 	} else if (IsStoryMsgId(id)) {
 		return false;
@@ -2914,6 +3249,9 @@ bool HistoryItem::canDelete() const {
 }
 
 bool HistoryItem::canDeleteForEveryone(TimeId now) const {
+	if (isDeleted() || isLocallyHidden()) {
+		return false;
+	}
 	const auto peer = _history->peer;
 	const auto &config = _history->session().serverConfig();
 	const auto messageToMyself = peer->isSelf();
@@ -3137,7 +3475,9 @@ void HistoryItem::translationDone(LanguageId to, TextWithEntities result) {
 }
 
 bool HistoryItem::canReact() const {
-	if (!isRegular()) {
+	if (isDeleted() || isLocallyHidden()) {
+		return false;
+	} else if (!isRegular()) {
 		return false;
 	} else if (isService()) {
 		return (_flags & MessageFlag::ReactionsAllowed);
@@ -3869,6 +4209,142 @@ bool HistoryItem::isService() const {
 	return Has<HistoryServiceData>();
 }
 
+void HistoryItem::applyLocalMessageState(const MTPMessage &data) {
+	auto &local = _history->session().local();
+	const auto id = fullId();
+	auto &entries = RevisionStore(local);
+	const auto i = entries.find(id);
+	if (i != entries.end()) {
+		if (!i->second.versions.empty()) {
+			AddComponents(HistoryMessageRevisionHistory::Bit());
+			Get<HistoryMessageRevisionHistory>()->versions = i->second.versions;
+		}
+		if (i->second.deletedDate) {
+			AddComponents(HistoryMessageDeleted::Bit());
+			Get<HistoryMessageDeleted>()->date = i->second.deletedDate;
+		}
+	}
+	if (!Has<HistoryMessageRevisionHistory>()) {
+		AddComponents(HistoryMessageRevisionHistory::Bit());
+		Get<HistoryMessageRevisionHistory>()->versions.push_back(
+			SnapshotFromMtp(data));
+	}
+	if (i == entries.end()) {
+		auto &entry = entries[id];
+		entry.versions = Get<HistoryMessageRevisionHistory>()->versions;
+		entry.deletedDate = deletedDate();
+		ScheduleRevisionStoreWrite(&_history->session(), local);
+	}
+	const auto &hidden = HiddenStore(local);
+	if (hidden.find(id) != hidden.end()) {
+		AddComponents(HistoryMessageLocallyHidden::Bit());
+	}
+}
+
+void HistoryItem::recordEditionSnapshot(const MTPMessage &data) {
+	if (isLocallyHidden()) {
+		return;
+	}
+	if (!Has<HistoryMessageRevisionHistory>()) {
+		AddComponents(HistoryMessageRevisionHistory::Bit());
+		Get<HistoryMessageRevisionHistory>()->versions.push_back(
+			SnapshotFromItem(this));
+	}
+	const auto history = Get<HistoryMessageRevisionHistory>();
+	if (history->versions.empty()) {
+		history->versions.push_back(SnapshotFromItem(this));
+	}
+	const auto next = SnapshotFromMtp(data);
+	if (!SameRevision(history->versions.back(), next)) {
+		history->versions.push_back(next);
+	}
+	auto &local = _history->session().local();
+	auto &entries = RevisionStore(local);
+	auto &entry = entries[fullId()];
+	entry.versions = history->versions;
+	entry.deletedDate = deletedDate();
+	FlushRevisionStore(local);
+}
+
+void HistoryItem::markDeleted(TimeId date) {
+	if (const auto deleted = Get<HistoryMessageDeleted>()) {
+		if (deleted->date) {
+			date = deleted->date;
+		}
+	}
+	if (!date) {
+		date = base::unixtime::now();
+	}
+	AddComponents(HistoryMessageDeleted::Bit());
+	Get<HistoryMessageDeleted>()->date = date;
+
+	auto &local = _history->session().local();
+	auto &entries = RevisionStore(local);
+	auto &entry = entries[fullId()];
+	if (const auto history = Get<HistoryMessageRevisionHistory>()) {
+		entry.versions = history->versions;
+	} else {
+		entry.versions.push_back(SnapshotFromItem(this));
+	}
+	entry.deletedDate = date;
+	FlushRevisionStore(local);
+
+	_history->owner().requestItemResize(this);
+	_history->owner().notifyItemDataChange(this);
+	_history->session().changes().messageUpdated(
+		this,
+		Data::MessageUpdate::Flag::Edited);
+}
+
+void HistoryItem::hideLocally() {
+	AddComponents(HistoryMessageLocallyHidden::Bit());
+	auto &local = _history->session().local();
+	auto &hidden = HiddenStore(local);
+	hidden.emplace(fullId());
+	FlushHiddenStore(local);
+	destroy();
+}
+
+bool HistoryItem::isDeleted() const {
+	return Has<HistoryMessageDeleted>();
+}
+
+bool HistoryItem::isLocallyHidden() const {
+	return Has<HistoryMessageLocallyHidden>();
+}
+
+bool HistoryItem::canRemoveLocally() const {
+	if (isLocallyHidden()
+		|| !isHistoryEntry()
+		|| !IsServerMsgId(id)
+		|| isUploading()
+		|| isSponsored()
+		|| isScheduled()
+		|| IsStoryMsgId(id)
+		|| isBusinessShortcut()) {
+		return false;
+	}
+	return true;
+}
+
+TimeId HistoryItem::deletedDate() const {
+	if (const auto deleted = Get<HistoryMessageDeleted>()) {
+		return deleted->date;
+	}
+	return 0;
+}
+
+int HistoryItem::editCount() const {
+	if (const auto history = Get<HistoryMessageRevisionHistory>()) {
+		return std::max(0, int(history->versions.size()) - 1);
+	}
+	return 0;
+}
+
+const HistoryMessageRevisionHistory *HistoryItem::revisionHistory() const {
+	return Get<HistoryMessageRevisionHistory>();
+}
+
 bool HistoryItem::unread(not_null<Data::Thread*> thread) const {
 	// Messages from myself are always read, unless scheduled.
 	if (_history->peer->isSelf() && !isFromScheduled()) {
@@ -4073,11 +4549,12 @@ bool HistoryItem::hasPossibleRestrictions() const {
 }
 
 bool HistoryItem::isEmpty() const {
-	return _text.empty()
+	return isLocallyHidden()
+		|| (_text.empty()
 		&& !_media
 		&& (!Has<HistoryMessageFactcheck>()
 			|| Get<HistoryMessageFactcheck>()->data.text.empty())
-		&& !Has<HistoryMessageLogEntryOriginal>();
+		&& !Has<HistoryMessageLogEntryOriginal>());
 }
 
 Data::SavedSublist *HistoryItem::savedSublist() const {
