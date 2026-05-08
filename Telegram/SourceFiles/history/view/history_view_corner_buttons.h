@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "base/object_ptr.h"
 
+#include <optional>
+
 class History;
 class HistoryItem;
 struct FullMsgId;
@@ -35,6 +37,7 @@ struct CornerButton {
 
 	object_ptr<Ui::JumpDownButton> widget;
 	Ui::Animations::Simple animation;
+	std::optional<int> hidingTop;
 	bool shown = false;
 };
 
@@ -54,6 +57,7 @@ public:
 	[[nodiscard]] virtual FullMsgId cornerButtonsCurrentId() = 0;
 	[[nodiscard]] virtual bool cornerButtonsIgnoreVisibility() = 0;
 	[[nodiscard]] virtual std::optional<bool> cornerButtonsDownShown() = 0;
+	[[nodiscard]] virtual int cornerButtonsUnreadCount() = 0;
 	[[nodiscard]] virtual bool cornerButtonsUnreadMayBeShown() = 0;
 	[[nodiscard]] virtual bool cornerButtonsHas(CornerButtonType type) = 0;
 	virtual void cornerButtonsSummarizeDown() = 0;

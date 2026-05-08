@@ -189,6 +189,7 @@ public:
 	FullMsgId cornerButtonsCurrentId() override;
 	bool cornerButtonsIgnoreVisibility() override;
 	std::optional<bool> cornerButtonsDownShown() override;
+	int cornerButtonsUnreadCount() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
@@ -245,7 +246,8 @@ private:
 		bool spoilered);
 	void highlightSingleNewMessage(const Data::MessagesSlice &slice);
 	void chooseAttach();
-	[[nodiscard]] SendMenu::Details sendMenuDetails() const;
+	[[nodiscard]] SendMenu::Details sendMenuDetails() const override;
+	bool processChosenSticker(ChatHelpers::FileChosen &&chosen) override;
 
 	void pushReplyReturn(not_null<HistoryItem*> item);
 	void checkReplyReturns();

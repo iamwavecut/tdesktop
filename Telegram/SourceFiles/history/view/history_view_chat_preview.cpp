@@ -181,6 +181,7 @@ private:
 	FullMsgId cornerButtonsCurrentId() override;
 	bool cornerButtonsIgnoreVisibility() override;
 	std::optional<bool> cornerButtonsDownShown() override;
+	int cornerButtonsUnreadCount() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
@@ -948,6 +949,10 @@ std::optional<bool> Item::cornerButtonsDownShown() {
 
 bool Item::cornerButtonsUnreadMayBeShown() {
 	return _inner->loadedAtBottomKnown();
+}
+
+int Item::cornerButtonsUnreadCount() {
+	return 0;
 }
 
 bool Item::cornerButtonsHas(CornerButtonType type) {

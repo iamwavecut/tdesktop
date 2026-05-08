@@ -102,6 +102,7 @@ constexpr auto kPreloadedScreensCountFull
 	= kPreloadedScreensCount + 1 + kPreloadedScreensCount;
 constexpr auto kClearUserpicsAfter = 50;
 constexpr auto kDeletedMessageOpacity = 0.275;
+constexpr auto kScrollDateHideOnDayCrossingTimeout = crl::time(3000);
 
 [[nodiscard]] std::unique_ptr<TranslateTracker> MaybeTranslateTracker(
 		History *history) {
@@ -945,6 +946,10 @@ void ListWidget::showAroundPosition(
 	refreshViewer();
 }
 
+void ListWidget::overrideInitialScroll(Fn<bool()> callback) {
+	_overrideInitialScroll = std::move(callback);
+}
+
 bool ListWidget::jumpToBottomInsteadOfUnread() const {
 	// If we want to jump to unread, but we're at the unread already,
 	// then jump to the end of the list.
@@ -1219,9 +1224,10 @@ void ListWidget::visibleTopBottomUpdated(
 	}
 	updateVisibleTopItem();
 	if (scrolledUp) {
+		_scrollDateAfterDayCrossing = false;
 		_scrollDateCheck.call();
 	} else {
-		scrollDateHideByTimer();
+		scrollDateCheckDownward();
 	}
 	_delegate->listVisibleAreaUpdated();
 	session().data().itemVisibilitiesUpdated();
@@ -1269,8 +1275,33 @@ void ListWidget::scrollDateCheck() {
 	}
 }
 
+void ListWidget::scrollDateCheckDownward() {
+	const auto previousDay = _scrollDateLastItem
+		? _scrollDateLastItem->dateTime().date()
+		: QDate();
+	const auto currentDay = _visibleTopItem
+		? _visibleTopItem->dateTime().date()
+		: QDate();
+	const auto crossedDay = previousDay.isValid()
+		&& currentDay.isValid()
+		&& (previousDay != currentDay);
+	_scrollDateLastItem = _visibleTopItem;
+	_scrollDateLastItemTop = _visibleTopFromItem;
+	if (crossedDay) {
+		if (!_scrollDateShown) {
+			toggleScrollDateShown();
+		}
+		_scrollDateAfterDayCrossing = true;
+		_scrollDateHideTimer.callOnce(
+			kScrollDateHideOnDayCrossingTimeout);
+	} else if (!_scrollDateAfterDayCrossing) {
+		scrollDateHideByTimer();
+	}
+}
+
 void ListWidget::scrollDateHideByTimer() {
 	_scrollDateHideTimer.cancel();
+	_scrollDateAfterDayCrossing = false;
 	if (!_scrollDateLink || ClickHandler::getPressed() != _scrollDateLink) {
 		scrollDateHide();
 	}
@@ -2855,9 +2886,9 @@ SelectedItems ListWidget::getSelectedItems() const {
 	return collectSelectedItems();
 }
 
-const TextSelection &ListWidget::getSelectedTextRange(
+TextSelection ListWidget::getSelectedTextRange(
 		not_null<HistoryItem*> item) const {
-	return _selectedTextRange;
+	return (_selectedTextItem == item) ? _selectedTextRange : TextSelection();
 }
 
 int ListWidget::findItemIndexByY(int y) const {
@@ -2976,11 +3007,11 @@ void ListWidget::mouseDoubleClickEvent(QMouseEvent *e) {
 void ListWidget::toggleFavoriteReaction(not_null<Element*> view) const {
 	const auto item = view->data();
 	const auto favorite = session().data().reactions().favoriteId();
-	if (!ranges::contains(
+	if (_delegate->listShowReactPremiumError(item, favorite)
+		|| !ranges::contains(
 			Data::LookupPossibleReactions(item).recent,
 			favorite,
-			&Data::Reaction::id)
-		|| _delegate->listShowReactPremiumError(item, favorite)) {
+			&Data::Reaction::id)) {
 		return;
 	} else if (!ranges::contains(item->chosenReactions(), favorite)) {
 		if (const auto top = itemTop(view); top >= 0) {
@@ -4833,8 +4864,11 @@ void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget) {
 	if (canDeleteAll) {
 		if (CanCreateModerateMessagesBox(historyItems)) {
 			const auto opt = DefaultModerateMessagesBoxOptions();
-			controller->show(
-				Box(CreateModerateMessagesBox, historyItems, confirmed, opt));
+			controller->show(Box(
+				CreateModerateMessagesBox,
+				ModerateMessagesBoxEntry{ .items = historyItems },
+				confirmed,
+				opt));
 		} else {
 			auto box = Box<DeleteMessagesBox>(
 				&widget->session(),

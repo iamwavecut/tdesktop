@@ -191,6 +191,7 @@ private:
 	FullMsgId cornerButtonsCurrentId() override;
 	bool cornerButtonsIgnoreVisibility() override;
 	std::optional<bool> cornerButtonsDownShown() override;
+	int cornerButtonsUnreadCount() override;
 	bool cornerButtonsUnreadMayBeShown() override;
 	bool cornerButtonsHas(HistoryView::CornerButtonType type) override;
 	void cornerButtonsSummarizeDown() override;
@@ -828,6 +829,10 @@ std::optional<bool> ListWidget::Inner::cornerButtonsDownShown() {
 
 bool ListWidget::Inner::cornerButtonsUnreadMayBeShown() {
 	return false;
+}
+
+int ListWidget::Inner::cornerButtonsUnreadCount() {
+	return 0;
 }
 
 bool ListWidget::Inner::cornerButtonsHas(

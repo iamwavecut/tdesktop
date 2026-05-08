@@ -56,8 +56,12 @@ cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
   `Telegram/build/mac_fast_install_forkgram.sh`. It builds `Release`, replaces
   only `Contents/MacOS/Forkgram` in the installed app, rewrites Homebrew/local
   install names to bundled frameworks, signs, verifies, and prints source and
-  installed executable hashes for traceability. Do not use it while Forkgram is
-  running.
+  installed executable hashes for traceability. For fast-track installs, do not
+  quit or kill the running app before the Release build is complete; keep the
+  user online during compilation and close Forkgram only immediately before the
+  script needs to replace `Contents/MacOS/Forkgram`. If the build finished but
+  install is blocked by the running app, close it at that point and rerun the
+  script with `--skip-build`.
 - Use the full packaging/install flow instead of fast install when dependencies,
   Qt plugins, app resources that must be bundled, CMake/configure settings,
   `Info.plist`, entitlements, or signing requirements changed, when the
@@ -167,6 +171,18 @@ auto nameProducer = GetNameProducer();
 // Instead of this:
 QString currentTitle = tr::lng_settings_title(tr::now);
 rpl::producer<QString> nameProducer = GetNameProducer();
+```
+
+**Use `_q` for QString literals:**
+
+Prefer the project literal `u"..."_q` instead of the verbose `QStringLiteral("...")` macro when creating `QString` values:
+
+```cpp
+// Prefer this:
+auto text = u"Settings"_q;
+
+// Instead of this:
+auto text = QStringLiteral("Settings");
 ```
 
 ## API Usage

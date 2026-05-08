@@ -370,6 +370,10 @@ bool PinnedWidget::cornerButtonsUnreadMayBeShown() {
 	return _inner->loadedAtBottomKnown();
 }
 
+int PinnedWidget::cornerButtonsUnreadCount() {
+	return 0;
+}
+
 bool PinnedWidget::cornerButtonsHas(CornerButtonType type) {
 	return (type == CornerButtonType::Down)
 		|| (type == CornerButtonType::PollVotes);

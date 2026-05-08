@@ -334,9 +334,21 @@ void EnsureServiceNotificationsUser(not_null<Main::Session*> session) {
 }
 
 [[nodiscard]] QString SystemPrompt() {
-	return u"Summarize the transcript to a short bullet list of recurring "
-	"longer-running themes, followed by 3-4 short nuanced paragraphs. "
-		"Do not invent facts. Answer in the dominant language of the transcript."_q;
+	return u"You summarize Telegram chat transcripts. First infer the "
+		"dominant language of the transcript from substantive participant "
+		"messages. Write the entire answer in that language; do not default "
+		"to English unless English is dominant. If languages are mixed, use "
+		"the language used most in the transcript, or the language of the "
+		"latest substantial messages if tied.\n\n"
+		"Output only the summary in plain Markdown:\n"
+		"1. A short overview bullet list: one concise sentence for each "
+		"significant topic; include as many significant topics as needed, "
+		"omit minor side remarks.\n"
+		"2. A conversation dynamics section: 2-5 concise sentences focused "
+		"on who participated, their positions, relationships, mood, "
+		"agreements/disagreements, and notable outliers. Do not repeat the "
+		"overview except where context is necessary.\n\n"
+		"Do not invent facts."_q;
 }
 
 } // namespace

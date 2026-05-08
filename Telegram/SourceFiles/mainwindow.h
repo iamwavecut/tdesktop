@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_main_window.h"
 #include "ui/layers/layer_widget.h"
 
+#include <QtCore/QStringList>
+
 class MainWidget;
 class QKeyEvent;
 
@@ -71,7 +73,7 @@ public:
 
 	bool takeThirdSectionFromLayer();
 
-	void sendPaths();
+	void handleStartFiles(QStringList interprets, QStringList paths);
 
 	[[nodiscard]] bool contentOverlapped(const QRect &globalRect);
 	[[nodiscard]] bool contentOverlapped(QWidget *w, QPaintEvent *e) {

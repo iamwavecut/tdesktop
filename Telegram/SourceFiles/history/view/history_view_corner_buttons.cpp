@@ -276,6 +276,11 @@ void CornerButtons::showAt(MsgId id) {
 void CornerButtons::updateVisibility(Type type, bool shown) {
 	auto &button = buttonByType(type);
 	if (button.shown != shown) {
+		if (shown) {
+			button.hidingTop = std::nullopt;
+		} else {
+			button.hidingTop = button.widget->y();
+		}
 		button.shown = shown;
 		button.animation.start(
 			[=] { updatePositions(); },
@@ -346,21 +351,18 @@ void CornerButtons::updateJumpDownVisibility(std::optional<int> counter) {
 	if (shown) {
 		updateVisibility(Type::Down, *shown);
 	}
-	if (counter) {
-		_unreadCount = *counter;
-		_down.widget->setUnreadCount(_unreadCount);
-	}
+	_unreadCount = counter.value_or(_delegate->cornerButtonsUnreadCount());
+	_down.widget->setUnreadCount(_unreadCount);
 	const auto summarizeLoading = _delegate->cornerButtonsSummarizeDownLoading();
 	const auto summarizeActive = _delegate->cornerButtonsSummarizeDownActive();
 	_summarizeDown.widget->setActive(summarizeActive);
 	_summarizeDown.widget->setLoading(summarizeLoading);
+	const auto downShown = shown ? *shown : _down.shown;
 	updateVisibility(
 		Type::SummarizeDown,
 		_delegate->cornerButtonsHas(Type::SummarizeDown)
-			&& (summarizeActive
-				|| summarizeLoading
-				|| _unreadCount >= kUnreadSummaryButtonThreshold)
-			&& (shown ? *shown : _down.shown));
+			&& (_unreadCount >= kUnreadSummaryButtonThreshold)
+			&& downShown);
 }
 
 void CornerButtons::updatePositions() {
@@ -370,6 +372,9 @@ void CornerButtons::updatePositions() {
 		if (shouldBeHidden != button.widget->isHidden()) {
 			button.widget->setVisible(!shouldBeHidden);
 		}
+		if (shouldBeHidden) {
+			button.hidingTop = std::nullopt;
+		}
 	};
 	const auto shown = [](CornerButton &button) {
 		return button.animation.value(button.shown ? 1. : 0.);
@@ -377,89 +382,29 @@ void CornerButtons::updatePositions() {
 
 	// All corner buttons is a child widgets of _scroll, not me.
 
-	const auto historyDownShown = shown(_down);
-	const auto historySummarizeDownShown = shown(_summarizeDown);
-	const auto unreadMentionsShown = shown(_mentions);
-	const auto unreadReactionsShown = shown(_reactions);
-	const auto unreadPollVotesShown = shown(_pollVotes);
 	const auto skip = st::historyUnreadThingsSkip;
-	const auto downShift = anim::interpolate(
-		0,
-		_down.widget->height() + skip,
-		historyDownShown);
-	const auto summarizeDownShift = anim::interpolate(
-		0,
-		_summarizeDown.widget->height() + skip,
-		historySummarizeDownShown);
-	const auto mentionsShift = anim::interpolate(
-		0,
-		_mentions.widget->height() + skip,
-		unreadMentionsShown);
-	const auto reactionsShift = anim::interpolate(
-		0,
-		_reactions.widget->height() + skip,
-		unreadReactionsShown);
-	{
-		const auto top = anim::interpolate(
+	auto bottom = _parent->height() - st::historyToDownPosition.y();
+	const auto place = [&](CornerButton &button) {
+		const auto progress = shown(button);
+		const auto targetTop = bottom - button.widget->height();
+		const auto right = anim::interpolate(
+			-button.widget->width(),
+			st::historyToDownPosition.x(),
+			progress);
+		const auto top = (!button.shown && button.animation.animating())
+			? button.hidingTop.value_or(targetTop)
+			: targetTop;
+		button.widget->moveToRight(right, top);
+		bottom -= anim::interpolate(
 			0,
-			_down.widget->height() + st::historyToDownPosition.y(),
-			historyDownShown);
-		_down.widget->moveToRight(
-			st::historyToDownPosition.x(),
-			_parent->height() - top);
-	}
-	{
-		const auto right = anim::interpolate(
-			-_summarizeDown.widget->width(),
-			st::historyToDownPosition.x(),
-			historySummarizeDownShown);
-		const auto top = _parent->height()
-			- _summarizeDown.widget->height()
-			- st::historyToDownPosition.y()
-			- downShift;
-		_summarizeDown.widget->moveToRight(
-			right,
-			top);
-	}
-	{
-		const auto right = anim::interpolate(
-			-_mentions.widget->width(),
-			st::historyToDownPosition.x(),
-			unreadMentionsShown);
-		const auto shift = downShift + summarizeDownShift;
-		const auto top = _parent->height()
-			- _mentions.widget->height()
-			- st::historyToDownPosition.y()
-			- shift;
-		_mentions.widget->moveToRight(right, top);
-	}
-	{
-		const auto right = anim::interpolate(
-			-_reactions.widget->width(),
-			st::historyToDownPosition.x(),
-			unreadReactionsShown);
-		const auto shift = downShift + summarizeDownShift + mentionsShift;
-		const auto top = _parent->height()
-			- _reactions.widget->height()
-			- st::historyToDownPosition.y()
-			- shift;
-		_reactions.widget->moveToRight(right, top);
-	}
-	{
-		const auto right = anim::interpolate(
-			-_pollVotes.widget->width(),
-			st::historyToDownPosition.x(),
-			unreadPollVotesShown);
-		const auto shift = downShift
-			+ summarizeDownShift
-			+ mentionsShift
-			+ reactionsShift;
-		const auto top = _parent->height()
-			- _pollVotes.widget->height()
-			- st::historyToDownPosition.y()
-			- shift;
-		_pollVotes.widget->moveToRight(right, top);
-	}
+			button.widget->height() + skip,
+			progress);
+	};
+	place(_down);
+	place(_summarizeDown);
+	place(_mentions);
+	place(_reactions);
+	place(_pollVotes);
 
 	checkVisibility(_down);
 	checkVisibility(_summarizeDown);
