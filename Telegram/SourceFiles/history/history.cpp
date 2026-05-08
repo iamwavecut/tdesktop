@@ -527,7 +527,6 @@ not_null<HistoryItem*> History::createItem(
 		bool newMessage) {
 	owner().fillMessagePeers(peer->id, message);
 	if (const auto result = owner().message(peer, id)) {
-		registerLoadedServerMessage(id);
 		if (detachExistingItem) {
 			result->removeMainView();
 		}
@@ -540,7 +539,6 @@ not_null<HistoryItem*> History::createItem(
 		return makeMessage(id, data, localFlags);
 	});
 	result->applyLocalMessageState(message);
-	registerLoadedServerMessage(id);
 	if (newMessage
 		&& !result->isLocallyHidden()
 		&& result->out()
@@ -574,6 +572,7 @@ std::vector<not_null<HistoryItem*>> History::createItems(
 			// the first message comes empty and is displayed incorrectly.
 			continue;
 		}
+		registerLoadedServerMessage(id);
 		const auto item = createItem(
 			id,
 			data,
@@ -797,6 +796,7 @@ not_null<HistoryItem*> History::addNewItem(
 		}
 	} else {
 		addNewToBack(item, unread);
+		registerLoadedServerMessage(item->id);
 		checkForLoadedAtTop(item);
 	}
 

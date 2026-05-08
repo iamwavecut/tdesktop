@@ -4465,6 +4465,16 @@ void HistoryWidget::loadMessagesDown() {
 	const auto minId = 0;
 	const auto historyHash = uint64(0);
 
+	if (const auto last = from->lastServerMessage()) {
+		if (last->id > offsetId) {
+			LOG(("History Info: loading missing bottom range. "
+				"Peer ID: %1, from message %2, known last %3."
+				).arg(from->peer->id.value & PeerId::kChatTypeMask
+				).arg(offsetId.bare
+				).arg(last->id.bare));
+		}
+	}
+
 	DEBUG_LOG(("JumpToEnd(%1, %2, %3): Loading down after %4."
 		).arg(_history->peer->name()
 		).arg(_history->inboxReadTillId().bare
