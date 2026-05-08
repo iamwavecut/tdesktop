@@ -20,20 +20,35 @@ Dependencies are located relative to the repository: `../Libraries`, `../win64/L
 
 ### Build Commands
 
-**From repository root, run:**
+**On this local macOS Forkgram machine, never run Debug builds.** Do not use
+`cmake --build out --config Debug ...` here. For routine code-only iterations,
+use the Release fast-install path:
+
+```bash
+Telegram/build/mac_fast_install_forkgram.sh
+```
+
+If the Release build finished but install was blocked because Forkgram was
+running, quit Forkgram at that point and rerun:
+
+```bash
+Telegram/build/mac_fast_install_forkgram.sh --skip-build
+```
+
+**Generic Windows/debug command, not for this local macOS machine:**
 
 ```bash
 cmake --build out --config Debug --target Telegram
 ```
 
-That's it. The `out/` directory is already configured. The executable will be at `out/Debug/Telegram.exe`.
+The `out/` directory is already configured. The executable will be at `out/Debug/Telegram.exe`.
 
 **Important:** When running cmake from a shell that doesn't support `cd`, use quoted absolute paths:
 ```bash
 cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 ```
 
-**Never build Release** - it's extremely heavy and not needed for testing changes.
+Do not apply the generic Debug workflow to the local macOS Forkgram checkout.
 
 ## Platform-Specific Requirements
 
@@ -110,8 +125,10 @@ Retrying builds wastes time and context. The ONLY fix is for the user to close t
 
 ## Best Practices
 
-1. **Always use Debug builds** - Release builds are extremely heavy
-2. **Don't build Release configuration** - it's too heavy for testing
+1. **On this local macOS Forkgram machine, never use Debug builds.** Use the
+   Release fast-install path for routine code iterations.
+2. Use full Release packaging only when dependencies, bundle resources,
+   CMake/configure settings, signing, or final distributable handoff require it.
 
 ## Text File Format
 

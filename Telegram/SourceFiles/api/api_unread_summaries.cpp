@@ -11,13 +11,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_url.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "data/data_document.h"
 #include "data/data_forum_topic.h"
 #include "data/data_history_messages.h"
+#include "data/data_message_reaction_id.h"
 #include "data/data_peer.h"
 #include "data/data_replies_list.h"
 #include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_messages.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -44,6 +47,12 @@ namespace {
 
 constexpr auto kMessagesAfterUnreadLimit = 1000000;
 constexpr auto kErrorToastDuration = 8 * crl::time(1000);
+
+struct TranscriptReaction {
+	QString emoji;
+	int count = 0;
+	int order = 0;
+};
 
 [[nodiscard]] QString NormalizeFailureDetails(QString text) {
 	text.replace(u"\r\n"_q, u"\n"_q);
@@ -101,6 +110,10 @@ constexpr auto kErrorToastDuration = 8 * crl::time(1000);
 	return text;
 }
 
+[[nodiscard]] QString PaidReactionEmoji() {
+	return QString::fromUtf8("\xe2\xad\x90");
+}
+
 [[nodiscard]] QString NormalizeAuthor(QString text) {
 	text.replace(u'\n', u' ');
 	text.replace(u'\r', u' ');
@@ -115,6 +128,112 @@ constexpr auto kErrorToastDuration = 8 * crl::time(1000);
 		return NormalizeAuthor(hidden->name);
 	}
 	return NormalizeAuthor(item->author()->shortName());
+}
+
+[[nodiscard]] QString CustomReactionEmoji(
+		not_null<HistoryItem*> item,
+		DocumentId customId) {
+	const auto document = item->history()->owner().document(customId);
+	const auto sticker = document->sticker();
+	return sticker ? sticker->alt : QString();
+}
+
+[[nodiscard]] QString ReactionEmoji(
+		not_null<HistoryItem*> item,
+		const Data::ReactionId &id) {
+	if (id.paid()) {
+		return PaidReactionEmoji();
+	} else if (const auto emoji = id.emoji(); !emoji.isEmpty()) {
+		return emoji;
+	} else if (const auto customId = id.custom()) {
+		return CustomReactionEmoji(item, customId);
+	}
+	return QString();
+}
+
+[[nodiscard]] QString FormatReactionsForTranscript(
+		not_null<HistoryItem*> item) {
+	if (item->reactionsAreTags()) {
+		return QString();
+	}
+	auto list = std::vector<TranscriptReaction>();
+	for (const auto &reaction : item->reactions()) {
+		if (reaction.count <= 0) {
+			continue;
+		}
+		const auto emoji = ReactionEmoji(item, reaction.id);
+		if (emoji.isEmpty()) {
+			continue;
+		}
+		const auto i = ranges::find(list, emoji, &TranscriptReaction::emoji);
+		if (i != end(list)) {
+			i->count += reaction.count;
+		} else {
+			list.push_back({
+				.emoji = emoji,
+				.count = reaction.count,
+				.order = int(list.size()),
+			});
+		}
+	}
+	if (list.empty()) {
+		return QString();
+	}
+	ranges::sort(list, [](const auto &a, const auto &b) {
+		if (a.count != b.count) {
+			return a.count > b.count;
+		}
+		return a.order < b.order;
+	});
+
+	auto parts = QStringList();
+	parts.reserve(int(list.size()));
+	for (const auto &reaction : list) {
+		parts.push_back(reaction.emoji
+			+ ((reaction.count > 1)
+				? u" x%1"_q.arg(reaction.count)
+				: QString()));
+	}
+	return u" [%1: %2]"_q
+		.arg(tr::lng_notification_reactions(tr::now))
+		.arg(parts.join(u", "_q));
+}
+
+[[nodiscard]] QString TextForTranscript(not_null<HistoryItem*> item) {
+	return NormalizeTextForTranscript(item->originalText().text)
+		+ FormatReactionsForTranscript(item);
+}
+
+[[nodiscard]] bool ItemHasTextForTranscript(not_null<HistoryItem*> item) {
+	return !item->isService()
+		&& !item->originalText().text.trimmed().isEmpty();
+}
+
+[[nodiscard]] std::vector<DocumentId> UnresolvedCustomReactionIds(
+		not_null<Data::Thread*> thread,
+		const Data::MessagesSlice &slice) {
+	auto result = std::vector<DocumentId>();
+	for (const auto &id : slice.ids) {
+		const auto item = thread->owner().message(id);
+		if (!item
+			|| item->isUnreadSummary()
+			|| item->reactionsAreTags()
+			|| !ItemHasTextForTranscript(item)) {
+			continue;
+		}
+		for (const auto &reaction : item->reactions()) {
+			const auto customId = reaction.id.custom();
+			if (!customId || reaction.count <= 0) {
+				continue;
+			}
+			const auto document = thread->owner().document(customId);
+			if (!document->sticker()
+				&& !ranges::contains(result, customId)) {
+				result.push_back(customId);
+			}
+		}
+	}
+	return result;
 }
 
 [[nodiscard]] QString ExtractTextPart(const QJsonValue &value) {
@@ -340,14 +459,22 @@ void EnsureServiceNotificationsUser(not_null<Main::Session*> session) {
 		"to English unless English is dominant. If languages are mixed, use "
 		"the language used most in the transcript, or the language of the "
 		"latest substantial messages if tied.\n\n"
+		"Some transcript lines may end with a localized reactions marker, "
+		"for example [Reactions: ...]. Treat these as audience reaction "
+		"signals for that specific message. Consider both the emoji meaning "
+		"and count: hearts, thumbs up, fire, and stars usually indicate "
+		"support or approval, while clown, poop, or negative emoji may "
+		"indicate mockery, disagreement, or controversy.\n\n"
 		"Output only the summary in plain Markdown:\n"
 		"1. A short overview bullet list: one concise sentence for each "
 		"significant topic; include as many significant topics as needed, "
 		"omit minor side remarks.\n"
 		"2. A conversation dynamics section: 2-5 concise sentences focused "
 		"on who participated, their positions, relationships, mood, "
-		"agreements/disagreements, and notable outliers. Do not repeat the "
-		"overview except where context is necessary.\n\n"
+		"agreements/disagreements, support, conflict, and notable outliers. "
+		"Use reactions when they clarify the mood or approval around a "
+		"message. Do not repeat the overview except where context is "
+		"necessary.\n\n"
 		"Do not invent facts."_q;
 }
 
@@ -429,15 +556,7 @@ UnreadSummaries::StartResult UnreadSummaries::request(
 	SourceForThread(thread) | rpl::filter([=](const Data::MessagesSlice &slice) {
 		return slice.skippedAfter == 0;
 	}) | rpl::take(1) | rpl::on_next([=](const Data::MessagesSlice &slice) {
-		const auto transcript = BuildTranscript(thread, slice);
-		const auto found = lookup(key);
-		if (!found || found->requestToken != token) {
-			return;
-		} else if (transcript.empty()) {
-			failRequest(key, Failure::NoText);
-			return;
-		}
-		startNetworkRequest(key, transcript);
+		prepareTranscriptAndStartNetworkRequest(key, token, thread, slice);
 	}, *current.lifetime);
 
 	return StartResult::Started;
@@ -508,7 +627,7 @@ UnreadSummaries::PreparedTranscript UnreadSummaries::BuildTranscript(
 		if (item->isService()) {
 			continue;
 		}
-		if (item->originalText().text.trimmed().isEmpty()) {
+		if (!ItemHasTextForTranscript(item)) {
 			continue;
 		}
 		textItems.push_back(item);
@@ -533,10 +652,80 @@ UnreadSummaries::PreparedTranscript UnreadSummaries::BuildTranscript(
 		lines.push_back(u"%1, %2: %3"_q
 			.arg(langDateTime(base::unixtime::parse(item->date())))
 			.arg(AuthorName(item))
-			.arg(NormalizeTextForTranscript(item->originalText().text)));
+			.arg(TextForTranscript(item)));
 	}
 	result.text = lines.join(u'\n');
 	return result;
+}
+
+void UnreadSummaries::prepareTranscriptAndStartNetworkRequest(
+		const ThreadKey &key,
+		int token,
+		not_null<Data::Thread*> thread,
+		const Data::MessagesSlice &slice) {
+	const auto unresolved = UnresolvedCustomReactionIds(thread, slice);
+	if (unresolved.empty()) {
+		buildTranscriptAndStartNetworkRequest(key, token, thread, slice);
+		return;
+	}
+
+	struct ResolveState {
+		Data::MessagesSlice slice;
+		int remaining = 0;
+	};
+
+	auto &current = state(key);
+	const auto resolveState = current.lifetime->make_state<ResolveState>();
+	resolveState->slice = slice;
+	resolveState->remaining = int(unresolved.size());
+
+	const auto resolved = [=] {
+		const auto found = lookup(key);
+		if (!found || found->requestToken != token) {
+			return;
+		}
+		if (--resolveState->remaining > 0) {
+			return;
+		}
+		buildTranscriptAndStartNetworkRequest(
+			key,
+			token,
+			thread,
+			resolveState->slice);
+	};
+
+	for (const auto customId : unresolved) {
+		thread->owner().customEmojiManager().resolve(
+			customId
+		) | rpl::take(
+			1
+		) | rpl::on_next_error(
+			[=](not_null<DocumentData*>) {
+				resolved();
+			},
+			[=](rpl::empty_error) {
+				resolved();
+			},
+			*current.lifetime);
+	}
+}
+
+void UnreadSummaries::buildTranscriptAndStartNetworkRequest(
+		const ThreadKey &key,
+		int token,
+		not_null<Data::Thread*> thread,
+		const Data::MessagesSlice &slice) {
+	const auto found = lookup(key);
+	if (!found || found->requestToken != token) {
+		return;
+	}
+
+	const auto transcript = BuildTranscript(thread, slice);
+	if (transcript.empty()) {
+		failRequest(key, Failure::NoText);
+		return;
+	}
+	startNetworkRequest(key, transcript);
 }
 
 void UnreadSummaries::startNetworkRequest(

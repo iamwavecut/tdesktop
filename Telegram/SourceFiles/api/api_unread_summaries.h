@@ -110,6 +110,16 @@ private:
 	void startNetworkRequest(
 		const ThreadKey &key,
 		PreparedTranscript transcript);
+	void prepareTranscriptAndStartNetworkRequest(
+		const ThreadKey &key,
+		int token,
+		not_null<Data::Thread*> thread,
+		const Data::MessagesSlice &slice);
+	void buildTranscriptAndStartNetworkRequest(
+		const ThreadKey &key,
+		int token,
+		not_null<Data::Thread*> thread,
+		const Data::MessagesSlice &slice);
 	void failRequest(
 		const ThreadKey &key,
 		Failure failure,
