@@ -4053,7 +4053,7 @@ ReplyButton::ButtonParameters Message::replyButtonParameters(
 	using namespace ReplyButton;
 	const auto clear = displayFastClear();
 	const auto reply = !clear && displayFastReply();
-	if ((!clear && !reply) || unwrapped()) {
+	if (!clear && (!reply || unwrapped())) {
 		return {};
 	}
 	auto result = ButtonParameters{ .context = data()->fullId() };
