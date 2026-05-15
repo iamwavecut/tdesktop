@@ -208,6 +208,10 @@ QString Account::supportModePath() const {
 	return _databasePath + u"support"_q;
 }
 
+QString Account::forkLocalMessageStatePath() const {
+	return _basePath + u"fork_message_state/"_q;
+}
+
 StartResult Account::legacyStart(const QByteArray &passcode) {
 	const auto result = readMapWith(MTP::AuthKeyPtr(), passcode);
 	if (result == ReadMapResult::Failed) {

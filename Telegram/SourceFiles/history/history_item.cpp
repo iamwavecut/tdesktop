@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/storage_account.h"
 #include "storage/storage_shared_media.h"
+#include "forkgram/local_message_state.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "main/main_session_settings.h"
@@ -86,14 +87,11 @@ constexpr auto kLocallyHiddenStoreVersion = qint32(1);
 
 using ItemPreview = HistoryView::ItemPreview;
 
-struct StoredMessageRevisionEntry {
-	std::vector<HistoryMessageRevisionSnapshot> versions;
-	TimeId deletedDate = 0;
-};
-
-using StoredMessageRevisionMap = base::flat_map<
-	FullMsgId,
-	StoredMessageRevisionEntry>;
+using StoredMessageRevisionSnapshot =
+	Forkgram::LocalMessageState::RevisionSnapshot;
+using StoredMessageRevisionEntry = Forkgram::LocalMessageState::RevisionEntry;
+using StoredMessageRevisionMap = Forkgram::LocalMessageState::RevisionMap;
+using StoredHiddenMessageMap = Forkgram::LocalMessageState::HiddenMap;
 
 [[nodiscard]] QByteArray SerializeMtpMessage(const MTPMessage &message) {
 	auto buffer = mtpBuffer();
@@ -191,7 +189,70 @@ using StoredMessageRevisionMap = base::flat_map<
 		&& a.editDate == b.editDate;
 }
 
-[[nodiscard]] StoredMessageRevisionMap ReadRevisionStore(
+[[nodiscard]] StoredMessageRevisionSnapshot StoredSnapshotFromHistory(
+		const HistoryMessageRevisionSnapshot &snapshot) {
+	return {
+		.raw = snapshot.raw,
+		.text = snapshot.text,
+		.media = snapshot.media,
+		.date = snapshot.date,
+		.editDate = snapshot.editDate,
+		.entitiesCount = snapshot.entitiesCount,
+	};
+}
+
+[[nodiscard]] HistoryMessageRevisionSnapshot HistorySnapshotFromStored(
+		const StoredMessageRevisionSnapshot &snapshot) {
+	return {
+		.raw = snapshot.raw,
+		.text = snapshot.text,
+		.media = snapshot.media,
+		.date = snapshot.date,
+		.editDate = snapshot.editDate,
+		.entitiesCount = snapshot.entitiesCount,
+	};
+}
+
+[[nodiscard]] std::vector<StoredMessageRevisionSnapshot> StoredSnapshots(
+		const std::vector<HistoryMessageRevisionSnapshot> &snapshots) {
+	auto result = std::vector<StoredMessageRevisionSnapshot>();
+	result.reserve(snapshots.size());
+	for (const auto &snapshot : snapshots) {
+		result.push_back(StoredSnapshotFromHistory(snapshot));
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<HistoryMessageRevisionSnapshot> HistorySnapshots(
+		const std::vector<StoredMessageRevisionSnapshot> &snapshots) {
+	auto result = std::vector<HistoryMessageRevisionSnapshot>();
+	result.reserve(snapshots.size());
+	for (const auto &snapshot : snapshots) {
+		result.push_back(HistorySnapshotFromStored(snapshot));
+	}
+	return result;
+}
+
+[[nodiscard]] bool NeedsPersistentRevisionEntry(
+		const StoredMessageRevisionEntry &entry) {
+	return entry.deletedDate || (entry.versions.size() > 1);
+}
+
+[[nodiscard]] bool RemoveTrivialRevisionEntries(
+		StoredMessageRevisionMap &entries) {
+	auto removed = false;
+	for (auto i = entries.begin(); i != entries.end();) {
+		if (NeedsPersistentRevisionEntry(i->second)) {
+			++i;
+		} else {
+			i = entries.erase(i);
+			removed = true;
+		}
+	}
+	return removed;
+}
+
+[[nodiscard]] StoredMessageRevisionMap ReadLegacyRevisionStore(
 		Storage::Account &local) {
 	const auto bytes = local.readMessageRevisions();
 	if (bytes.isEmpty()) {
@@ -219,7 +280,7 @@ using StoredMessageRevisionMap = base::flat_map<
 		entry.deletedDate = deletedDate;
 		entry.versions.reserve(versionsCount);
 		for (auto j = 0; j != versionsCount; ++j) {
-			auto snapshot = HistoryMessageRevisionSnapshot();
+			auto snapshot = StoredMessageRevisionSnapshot();
 			auto date = qint32();
 			auto editDate = qint32();
 			auto entitiesCount = qint32();
@@ -242,37 +303,7 @@ using StoredMessageRevisionMap = base::flat_map<
 	return (stream.status() == QDataStream::Ok) ? result : StoredMessageRevisionMap();
 }
 
-void WriteRevisionStore(
-		Storage::Account &local,
-		const StoredMessageRevisionMap &entries) {
-	if (entries.empty()) {
-		local.writeMessageRevisions({});
-		return;
-	}
-	auto bytes = QByteArray();
-	auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
-	stream.setVersion(QDataStream::Qt_5_1);
-	stream << kRevisionStoreVersion << qint32(entries.size());
-	for (const auto &[id, entry] : entries) {
-		stream
-			<< SerializePeerId(id.peer)
-			<< qint64(id.msg.bare)
-			<< qint32(entry.deletedDate)
-			<< qint32(entry.versions.size());
-		for (const auto &snapshot : entry.versions) {
-			stream
-				<< qint32(snapshot.date)
-				<< qint32(snapshot.editDate)
-				<< qint32(snapshot.entitiesCount)
-				<< snapshot.raw
-				<< snapshot.text
-				<< snapshot.media;
-		}
-	}
-	local.writeMessageRevisions(bytes);
-}
-
-[[nodiscard]] base::flat_set<FullMsgId> ReadHiddenStore(
+[[nodiscard]] StoredHiddenMessageMap ReadLegacyHiddenStore(
 		Storage::Account &local) {
 	const auto bytes = local.readLocallyHiddenMessages();
 	if (bytes.isEmpty()) {
@@ -286,47 +317,52 @@ void WriteRevisionStore(
 	if (version != kLocallyHiddenStoreVersion || count < 0) {
 		return {};
 	}
-	auto result = base::flat_set<FullMsgId>();
+	auto result = StoredHiddenMessageMap();
+	const auto now = base::unixtime::now();
 	for (auto i = 0; i != count; ++i) {
 		auto peerSerialized = quint64();
 		auto msg = qint64();
 		stream >> peerSerialized >> msg;
-		result.emplace(FullMsgId(DeserializePeerId(peerSerialized), MsgId(msg)));
+		result.emplace(
+			FullMsgId(DeserializePeerId(peerSerialized), MsgId(msg)),
+			now);
 	}
 	return (stream.status() == QDataStream::Ok)
 		? result
-		: base::flat_set<FullMsgId>();
-}
-
-void WriteHiddenStore(
-		Storage::Account &local,
-		const base::flat_set<FullMsgId> &hidden) {
-	if (hidden.empty()) {
-		local.writeLocallyHiddenMessages({});
-		return;
-	}
-	auto bytes = QByteArray();
-	auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
-	stream.setVersion(QDataStream::Qt_5_1);
-	stream << kLocallyHiddenStoreVersion << qint32(hidden.size());
-	for (const auto &id : hidden) {
-		stream << SerializePeerId(id.peer) << qint64(id.msg.bare);
-	}
-	local.writeLocallyHiddenMessages(bytes);
+		: StoredHiddenMessageMap();
 }
 
 struct MessageLocalStateCache {
 	Storage::Account *local = nullptr;
 	StoredMessageRevisionMap revisions;
-	base::flat_set<FullMsgId> hidden;
-	bool revisionsLoaded = false;
-	bool hiddenLoaded = false;
-	bool revisionsWriteScheduled = false;
+	StoredHiddenMessageMap hidden;
+	base::flat_set<int> dirtyPartitions;
+	bool loaded = false;
+	bool writeScheduled = false;
+	bool rewriteAll = false;
 };
 
 MessageLocalStateCache &MessageLocalState() {
 	static auto result = MessageLocalStateCache();
 	return result;
+}
+
+void WriteLocalMessageState(
+		Storage::Account &local,
+		MessageLocalStateCache &cache) {
+	if (!cache.loaded) {
+		return;
+	}
+	cache.writeScheduled = false;
+	Forkgram::LocalMessageState::WriteAsync(
+		local.forkLocalMessageStatePath(),
+		local.peekLegacyLocalKey(),
+		cache.revisions,
+		cache.hidden,
+		cache.dirtyPartitions,
+		cache.rewriteAll);
+	cache.dirtyPartitions.clear();
+	cache.rewriteAll = false;
 }
 
 void SwitchMessageLocalState(Storage::Account &local) {
@@ -335,72 +371,91 @@ void SwitchMessageLocalState(Storage::Account &local) {
 		return;
 	}
 	if (cache.local
-		&& cache.revisionsLoaded
-		&& cache.revisionsWriteScheduled) {
-		WriteRevisionStore(*cache.local, cache.revisions);
+		&& cache.loaded
+		&& (cache.writeScheduled
+			|| cache.rewriteAll
+			|| !cache.dirtyPartitions.empty())) {
+		WriteLocalMessageState(*cache.local, cache);
 	}
 	cache = MessageLocalStateCache();
 	cache.local = &local;
 }
 
-StoredMessageRevisionMap &RevisionStore(Storage::Account &local) {
-	SwitchMessageLocalState(local);
-	auto &cache = MessageLocalState();
-	if (!cache.revisionsLoaded) {
-		cache.revisions = ReadRevisionStore(local);
-		cache.revisionsLoaded = true;
+void MarkDirtyPartition(MessageLocalStateCache &cache, int partition) {
+	if (partition) {
+		cache.dirtyPartitions.emplace(partition);
 	}
-	return cache.revisions;
 }
 
-base::flat_set<FullMsgId> &HiddenStore(Storage::Account &local) {
+void EnsureMessageLocalStateLoaded(Storage::Account &local) {
 	SwitchMessageLocalState(local);
 	auto &cache = MessageLocalState();
-	if (!cache.hiddenLoaded) {
-		cache.hidden = ReadHiddenStore(local);
-		cache.hiddenLoaded = true;
-	}
-	return cache.hidden;
-}
-
-void FlushRevisionStore(Storage::Account &local) {
-	SwitchMessageLocalState(local);
-	auto &cache = MessageLocalState();
-	if (!cache.revisionsLoaded) {
+	if (cache.loaded) {
 		return;
 	}
-	cache.revisionsWriteScheduled = false;
-	WriteRevisionStore(local, cache.revisions);
+	auto stored = Forkgram::LocalMessageState::Read(
+		local.forkLocalMessageStatePath(),
+		local.peekLegacyLocalKey());
+	cache.revisions = std::move(stored.revisions);
+	cache.hidden = std::move(stored.hidden);
+	auto rewriteAll = false;
+	if (auto legacy = ReadLegacyRevisionStore(local); !legacy.empty()) {
+		for (auto &[id, entry] : legacy) {
+			cache.revisions.emplace(id, std::move(entry));
+		}
+		local.writeMessageRevisions({});
+		rewriteAll = true;
+	}
+	if (auto legacy = ReadLegacyHiddenStore(local); !legacy.empty()) {
+		for (auto &[id, date] : legacy) {
+			cache.hidden.emplace(id, date);
+		}
+		local.writeLocallyHiddenMessages({});
+		rewriteAll = true;
+	}
+	if (RemoveTrivialRevisionEntries(cache.revisions)) {
+		rewriteAll = true;
+	}
+	if (Forkgram::LocalMessageState::PruneExpiredRevisionEntries(
+		cache.revisions,
+		base::unixtime::now())) {
+		rewriteAll = true;
+	}
+	cache.loaded = true;
+	if (rewriteAll) {
+		cache.rewriteAll = true;
+		WriteLocalMessageState(local, cache);
+	}
 }
 
-void ScheduleRevisionStoreWrite(
+StoredMessageRevisionMap &RevisionStore(Storage::Account &local) {
+	EnsureMessageLocalStateLoaded(local);
+	return MessageLocalState().revisions;
+}
+
+StoredHiddenMessageMap &HiddenStore(Storage::Account &local) {
+	EnsureMessageLocalStateLoaded(local);
+	return MessageLocalState().hidden;
+}
+
+void ScheduleLocalMessageStateWrite(
 		Main::Session *session,
 		Storage::Account &local) {
 	SwitchMessageLocalState(local);
 	auto &cache = MessageLocalState();
-	if (!cache.revisionsLoaded || cache.revisionsWriteScheduled) {
+	if (!cache.loaded || cache.writeScheduled) {
 		return;
 	}
-	cache.revisionsWriteScheduled = true;
+	cache.writeScheduled = true;
 	crl::on_main(session, [local = &local] {
 		auto &cache = MessageLocalState();
 		if (cache.local != local
-			|| !cache.revisionsLoaded
-			|| !cache.revisionsWriteScheduled) {
+			|| !cache.loaded
+			|| !cache.writeScheduled) {
 			return;
 		}
-		cache.revisionsWriteScheduled = false;
-		WriteRevisionStore(*local, cache.revisions);
+		WriteLocalMessageState(*local, cache);
 	});
-}
-
-void FlushHiddenStore(Storage::Account &local) {
-	SwitchMessageLocalState(local);
-	auto &cache = MessageLocalState();
-	if (!cache.hiddenLoaded) {
-		return;
-	}
-	WriteHiddenStore(local, cache.hidden);
 }
 
 template <typename T>
@@ -4244,7 +4299,7 @@ bool HistoryItem::isService() const {
 	return Has<HistoryServiceData>();
 }
 
-void HistoryItem::applyLocalMessageState(const MTPMessage &data) {
+void HistoryItem::applyLocalMessageState(const MTPMessage &) {
 	auto &local = _history->session().local();
 	const auto id = fullId();
 	auto &entries = RevisionStore(local);
@@ -4252,23 +4307,13 @@ void HistoryItem::applyLocalMessageState(const MTPMessage &data) {
 	if (i != entries.end()) {
 		if (!i->second.versions.empty()) {
 			AddComponents(HistoryMessageRevisionHistory::Bit());
-			Get<HistoryMessageRevisionHistory>()->versions = i->second.versions;
+			Get<HistoryMessageRevisionHistory>()->versions = HistorySnapshots(
+				i->second.versions);
 		}
 		if (i->second.deletedDate) {
 			AddComponents(HistoryMessageDeleted::Bit());
 			Get<HistoryMessageDeleted>()->date = i->second.deletedDate;
 		}
-	}
-	if (!Has<HistoryMessageRevisionHistory>()) {
-		AddComponents(HistoryMessageRevisionHistory::Bit());
-		Get<HistoryMessageRevisionHistory>()->versions.push_back(
-			SnapshotFromMtp(data));
-	}
-	if (i == entries.end()) {
-		auto &entry = entries[id];
-		entry.versions = Get<HistoryMessageRevisionHistory>()->versions;
-		entry.deletedDate = deletedDate();
-		ScheduleRevisionStoreWrite(&_history->session(), local);
 	}
 	const auto &hidden = HiddenStore(local);
 	if (hidden.find(id) != hidden.end()) {
@@ -4295,10 +4340,26 @@ void HistoryItem::recordEditionSnapshot(const MTPMessage &data) {
 	}
 	auto &local = _history->session().local();
 	auto &entries = RevisionStore(local);
-	auto &entry = entries[fullId()];
-	entry.versions = history->versions;
+	const auto now = base::unixtime::now();
+	const auto id = fullId();
+	auto i = entries.find(id);
+	const auto oldPartition = (i != entries.end())
+		? Forkgram::LocalMessageState::PartitionForRevisionEntry(
+			i->second,
+			now)
+		: 0;
+	if (i == entries.end()) {
+		i = entries.emplace(id, StoredMessageRevisionEntry()).first;
+	}
+	auto &entry = i->second;
+	entry.versions = StoredSnapshots(history->versions);
 	entry.deletedDate = deletedDate();
-	FlushRevisionStore(local);
+	auto &cache = MessageLocalState();
+	MarkDirtyPartition(cache, oldPartition);
+	MarkDirtyPartition(
+		cache,
+		Forkgram::LocalMessageState::PartitionForRevisionEntry(entry, now));
+	ScheduleLocalMessageStateWrite(&_history->session(), local);
 }
 
 void HistoryItem::markDeleted(TimeId date) {
@@ -4315,14 +4376,30 @@ void HistoryItem::markDeleted(TimeId date) {
 
 	auto &local = _history->session().local();
 	auto &entries = RevisionStore(local);
-	auto &entry = entries[fullId()];
+	const auto id = fullId();
+	auto i = entries.find(id);
+	const auto oldPartition = (i != entries.end())
+		? Forkgram::LocalMessageState::PartitionForRevisionEntry(
+			i->second,
+			date)
+		: 0;
+	if (i == entries.end()) {
+		i = entries.emplace(id, StoredMessageRevisionEntry()).first;
+	}
+	auto &entry = i->second;
 	if (const auto history = Get<HistoryMessageRevisionHistory>()) {
-		entry.versions = history->versions;
+		entry.versions = StoredSnapshots(history->versions);
 	} else {
-		entry.versions.push_back(SnapshotFromItem(this));
+		entry.versions.push_back(StoredSnapshotFromHistory(
+			SnapshotFromItem(this)));
 	}
 	entry.deletedDate = date;
-	FlushRevisionStore(local);
+	auto &cache = MessageLocalState();
+	MarkDirtyPartition(cache, oldPartition);
+	MarkDirtyPartition(
+		cache,
+		Forkgram::LocalMessageState::PartitionForRevisionEntry(entry, date));
+	ScheduleLocalMessageStateWrite(&_history->session(), local);
 
 	_history->owner().requestItemResize(this);
 	_history->owner().notifyItemDataChange(this);
@@ -4335,8 +4412,13 @@ void HistoryItem::hideLocally() {
 	AddComponents(HistoryMessageLocallyHidden::Bit());
 	auto &local = _history->session().local();
 	auto &hidden = HiddenStore(local);
-	hidden.emplace(fullId());
-	FlushHiddenStore(local);
+	const auto date = base::unixtime::now();
+	const auto i = hidden.emplace(fullId(), date).first;
+	auto &cache = MessageLocalState();
+	MarkDirtyPartition(
+		cache,
+		Forkgram::LocalMessageState::PartitionFromDate(i->second));
+	ScheduleLocalMessageStateWrite(&_history->session(), local);
 	destroy();
 }
 

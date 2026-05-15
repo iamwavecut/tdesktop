@@ -78,6 +78,7 @@ public:
 
 	[[nodiscard]] QString tempDirectory() const;
 	[[nodiscard]] QString supportModePath() const;
+	[[nodiscard]] QString forkLocalMessageStatePath() const;
 
 	[[nodiscard]] MTP::AuthKeyPtr peekLegacyLocalKey() const {
 		return _localKey;

@@ -6,6 +6,8 @@ add_library(tdesktop::td_forkgram ALIAS td_forkgram)
 
 nice_target_sources(td_forkgram ${src_loc}
 PRIVATE
+    forkgram/local_message_state.cpp
+    forkgram/local_message_state.h
     forkgram/uri_open.cpp
     forkgram/uri_open.h
 )
@@ -22,5 +24,8 @@ PUBLIC
 target_link_libraries(td_forkgram
 PUBLIC
     tdesktop::td_lang
+    tdesktop::td_scheme
     desktop-app::lib_base
+    desktop-app::lib_crl
+    desktop-app::external_libsodium
 )
