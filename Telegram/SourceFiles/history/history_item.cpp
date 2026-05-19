@@ -337,6 +337,7 @@ struct MessageLocalStateCache {
 	StoredMessageRevisionMap revisions;
 	StoredHiddenMessageMap hidden;
 	base::flat_set<int> dirtyPartitions;
+	TimeId nextPruneAt = 0;
 	bool loaded = false;
 	bool writeScheduled = false;
 	bool rewriteAll = false;
@@ -365,6 +366,24 @@ void WriteLocalMessageState(
 	cache.rewriteAll = false;
 }
 
+void PruneLoadedMessageLocalState(
+		Storage::Account &local,
+		MessageLocalStateCache &cache,
+		TimeId now) {
+	if (cache.nextPruneAt > now) {
+		return;
+	}
+	cache.nextPruneAt = now
+		+ TimeId(Forkgram::LocalMessageState::kSecondsInDay);
+	if (!Forkgram::LocalMessageState::PruneExpiredRevisionEntries(
+		cache.revisions,
+		now)) {
+		return;
+	}
+	cache.rewriteAll = true;
+	WriteLocalMessageState(local, cache);
+}
+
 void SwitchMessageLocalState(Storage::Account &local) {
 	auto &cache = MessageLocalState();
 	if (cache.local == &local) {
@@ -390,7 +409,9 @@ void MarkDirtyPartition(MessageLocalStateCache &cache, int partition) {
 void EnsureMessageLocalStateLoaded(Storage::Account &local) {
 	SwitchMessageLocalState(local);
 	auto &cache = MessageLocalState();
+	const auto now = base::unixtime::now();
 	if (cache.loaded) {
+		PruneLoadedMessageLocalState(local, cache, now);
 		return;
 	}
 	auto stored = Forkgram::LocalMessageState::Read(
@@ -418,10 +439,12 @@ void EnsureMessageLocalStateLoaded(Storage::Account &local) {
 	}
 	if (Forkgram::LocalMessageState::PruneExpiredRevisionEntries(
 		cache.revisions,
-		base::unixtime::now())) {
+		now)) {
 		rewriteAll = true;
 	}
 	cache.loaded = true;
+	cache.nextPruneAt = now
+		+ TimeId(Forkgram::LocalMessageState::kSecondsInDay);
 	if (rewriteAll) {
 		cache.rewriteAll = true;
 		WriteLocalMessageState(local, cache);

@@ -25,6 +25,8 @@ using AuthKeyPtr = std::shared_ptr<AuthKey>;
 namespace Forkgram::LocalMessageState {
 
 constexpr auto kRevisionRetentionMonths = 24;
+constexpr auto kDeletedRetentionDays = 7;
+constexpr auto kSecondsInDay = 24 * 60 * 60;
 
 struct RevisionSnapshot {
 	QByteArray raw;
@@ -79,14 +81,23 @@ struct Snapshot {
 	return PartitionFromDate(date ? date : fallback);
 }
 
+[[nodiscard]] inline bool DeletedEntryExpired(
+		const RevisionEntry &entry,
+		TimeId now) {
+	const auto cutoff = std::max(now, TimeId(1))
+		- TimeId(kDeletedRetentionDays * kSecondsInDay);
+	return entry.deletedDate > 0 && entry.deletedDate <= cutoff;
+}
+
 [[nodiscard]] inline bool PruneExpiredRevisionEntries(
 		RevisionMap &revisions,
 		TimeId now) {
 	const auto cutoff = PartitionCutoff(now, kRevisionRetentionMonths);
 	auto changed = false;
 	for (auto i = revisions.begin(); i != revisions.end();) {
-		if (!i->second.deletedDate
-			&& PartitionForRevisionEntry(i->second, now) < cutoff) {
+		if (DeletedEntryExpired(i->second, now)
+			|| (!i->second.deletedDate
+				&& PartitionForRevisionEntry(i->second, now) < cutoff)) {
 			i = revisions.erase(i);
 			changed = true;
 		} else {
