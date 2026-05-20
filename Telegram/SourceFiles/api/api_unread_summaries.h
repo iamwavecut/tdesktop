@@ -53,6 +53,7 @@ public:
 		TextWithEntities lastSummaryText;
 		FullMsgId shownItemId;
 		int version = 0;
+		int shownVersion = 0;
 	};
 
 	enum class StartResult {

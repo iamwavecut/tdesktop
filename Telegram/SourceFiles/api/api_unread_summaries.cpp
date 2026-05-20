@@ -12,11 +12,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "data/data_document.h"
+#include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_history_messages.h"
 #include "data/data_message_reaction_id.h"
 #include "data/data_peer.h"
 #include "data/data_replies_list.h"
+#include "data/data_saved_messages.h"
 #include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_messages.h"
@@ -516,7 +518,9 @@ bool UnreadSummaries::loading(not_null<const Data::Thread*> thread) const {
 
 bool UnreadSummaries::shown(not_null<const Data::Thread*> thread) const {
 	const auto found = lookup(Key(thread));
-	if (!found || !found->entry.shownItemId) {
+	if (!found
+		|| !found->entry.shownItemId
+		|| found->entry.shownVersion != found->entry.version) {
 		return false;
 	}
 	const auto item = thread->owner().message(found->entry.shownItemId);
@@ -556,7 +560,14 @@ UnreadSummaries::StartResult UnreadSummaries::request(
 	SourceForThread(thread) | rpl::filter([=](const Data::MessagesSlice &slice) {
 		return slice.skippedAfter == 0;
 	}) | rpl::take(1) | rpl::on_next([=](const Data::MessagesSlice &slice) {
-		prepareTranscriptAndStartNetworkRequest(key, token, thread, slice);
+		if (const auto resolved = resolveThread(key)) {
+			prepareTranscriptAndStartNetworkRequest(key, token, resolved, slice);
+		} else {
+			failRequest(
+				key,
+				Failure::Inject,
+				u"The chat thread was not available to prepare a summary."_q);
+		}
 	}, *current.lifetime);
 
 	return StartResult::Started;
@@ -570,7 +581,8 @@ void UnreadSummaries::restore(not_null<Data::Thread*> thread) {
 	}
 	if (current.entry.shownItemId) {
 		if (const auto item = thread->owner().message(current.entry.shownItemId)) {
-			if (ThreadContainsItem(thread, item)) {
+			if (current.entry.shownVersion == current.entry.version
+				&& ThreadContainsItem(thread, item)) {
 				return;
 			}
 			item->history()->destroyMessage(item);
@@ -581,11 +593,13 @@ void UnreadSummaries::restore(not_null<Data::Thread*> thread) {
 		current.entry.lastSummaryText);
 	if (const auto item = thread->owner().message(current.entry.shownItemId)) {
 		if (ThreadContainsItem(thread, item)) {
+			current.entry.shownVersion = current.entry.version;
 			return;
 		}
 		item->history()->destroyMessage(item);
 	}
 	current.entry.shownItemId = FullMsgId();
+	current.entry.shownVersion = 0;
 }
 
 rpl::producer<Data::MessagesSlice> UnreadSummaries::SourceForThread(
@@ -687,11 +701,18 @@ void UnreadSummaries::prepareTranscriptAndStartNetworkRequest(
 		if (--resolveState->remaining > 0) {
 			return;
 		}
-		buildTranscriptAndStartNetworkRequest(
-			key,
-			token,
-			thread,
-			resolveState->slice);
+		if (const auto resolved = resolveThread(key)) {
+			buildTranscriptAndStartNetworkRequest(
+				key,
+				token,
+				resolved,
+				resolveState->slice);
+		} else {
+			failRequest(
+				key,
+				Failure::Inject,
+				u"The chat thread was not available to prepare a summary."_q);
+		}
 	};
 
 	for (const auto customId : unresolved) {
@@ -819,36 +840,39 @@ void UnreadSummaries::startNetworkRequest(
 			rangeFromDate,
 			rangeTillDate,
 			includedMessages);
-		if (const auto history = resolveHistory(key)) {
-			if (state.entry.shownItemId) {
-				if (const auto item = history->owner().message(
-						state.entry.shownItemId)) {
-					history->destroyMessage(item);
-				}
-			}
-		}
+		const auto previousText = state.entry.lastSummaryText;
+		const auto previousVersion = state.entry.version;
+		const auto previousShownItemId = state.entry.shownItemId;
+		const auto previousShownVersion = state.entry.shownVersion;
+		const auto version = state.entry.version + 1;
+		state.entry.lastSummaryText = formatted;
+		state.entry.version = version;
 		if (const auto thread = resolveThread(key)) {
-			state.entry.shownItemId = injectSummary(thread, formatted);
-			const auto item = thread->owner().message(state.entry.shownItemId);
+			const auto shownItemId = injectSummary(thread, formatted);
+			const auto item = thread->owner().message(shownItemId);
 			if (!item || !ThreadContainsItem(thread, item)) {
 				if (item) {
 					item->history()->destroyMessage(item);
 				}
+				state.entry.lastSummaryText = previousText;
+				state.entry.version = previousVersion;
+				state.entry.shownItemId = previousShownItemId;
+				state.entry.shownVersion = previousShownVersion;
 				failRequest(
 					key,
 					Failure::Inject,
 					u"The summary message was created outside the current chat thread."_q);
 				return;
 			}
-		} else {
-			failRequest(
-				key,
-				Failure::Inject,
-				u"The current chat thread was not available anymore."_q);
-			return;
+			if (const auto history = resolveHistory(key)) {
+				if (const auto item = history->owner().message(
+						previousShownItemId)) {
+					history->destroyMessage(item);
+				}
+			}
+			state.entry.shownItemId = shownItemId;
+			state.entry.shownVersion = version;
 		}
-		state.entry.lastSummaryText = formatted;
-		state.entry.version++;
 		finishLoading(key);
 	});
 }
@@ -914,8 +938,17 @@ Data::Thread *UnreadSummaries::resolveThread(const ThreadKey &key) const {
 		return nullptr;
 	} else if (!key.topicRootId && !key.monoforumPeerId) {
 		return history;
+	} else if (key.topicRootId) {
+		const auto forum = history->peer->forum();
+		return forum ? forum->enforceTopicFor(key.topicRootId) : nullptr;
+	} else if (key.monoforumPeerId) {
+		const auto monoforum = history->peer->monoforum();
+		return monoforum
+			? monoforum->sublist(
+				_session->data().peer(key.monoforumPeerId)).get()
+			: nullptr;
 	}
-	return history->threadFor(key.topicRootId, key.monoforumPeerId);
+	Unexpected("Thread key in UnreadSummaries::resolveThread.");
 }
 
 UnreadSummaries::State &UnreadSummaries::state(const ThreadKey &key) {
