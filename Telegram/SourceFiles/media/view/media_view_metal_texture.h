@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QSize>
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+
 class QRhi;
 class QRhiTexture;
 
@@ -38,5 +40,7 @@ private:
 };
 
 } // namespace Media::View
+
+#endif // Qt >= 6.7
 
 #endif // Q_OS_MAC

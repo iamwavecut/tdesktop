@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/userpic_view.h"
+#include "history/history_inner_widget_accessibility.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include <QtGui/QPainterPath>
@@ -110,6 +111,25 @@ public:
 		not_null<Window::SessionController*> controller,
 		not_null<History*> history);
 	~HistoryInner();
+
+	// Accessibility.
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::List;
+	}
+	Qt::FocusPolicy accessibilityFocusPolicy() override {
+		return Qt::TabFocus;
+	}
+	int accessibilityChildCount() const override;
+	QString accessibilityChildName(int index) const override;
+	QAccessible::State accessibilityChildState(int index) const override;
+	QAccessible::Role accessibilityChildRole() const override;
+	QRect accessibilityChildRect(int index) const override;
+	int accessibilityChildColumnCount(int row) const override;
+	QAccessible::Role accessibilityChildSubItemRole() const override;
+	QString accessibilityChildSubItemName(
+		int row, int column) const override;
+	QString accessibilityChildSubItemValue(
+		int row, int column) const override;
 
 	[[nodiscard]] Main::Session &session() const;
 	[[nodiscard]] not_null<Ui::ChatTheme*> theme() const {
@@ -252,6 +272,7 @@ public:
 	-> std::unique_ptr<HistoryMainElementDelegateMixin>;
 
 protected:
+	void focusInEvent(QFocusEvent *e) override;
 	bool focusNextPrevChild(bool next) override;
 
 	bool eventHook(QEvent *e) override; // calls touchEvent when necessary
@@ -268,6 +289,15 @@ protected:
 	void contextMenuEvent(QContextMenuEvent *e) override;
 
 private:
+	[[nodiscard]] std::vector<Element*> accessibleElements() const;
+	[[nodiscard]] int accessibilityUnreadBarIndex() const;
+	void toggleMessageSelection();
+	void playPauseFocusedMedia();
+	void setAccessibilityFocusedItem(int index, HistoryItem *item);
+	void announceAccessibilityFocus(int index);
+	[[nodiscard]] auto computeActiveColumns(int row) const
+		-> const std::vector<HistoryView::MessageSubItem> &;
+
 	void onTouchSelect();
 	void onTouchScrollTimer();
 	void markReadMetricsStale();
@@ -366,6 +396,9 @@ private:
 
 	QPoint mapPointToItem(QPoint p, const Element *view) const;
 	QPoint mapPointToItem(QPoint p, const HistoryItem *item) const;
+	[[nodiscard]] not_null<HistoryItem*> lookupItemByPoint(
+		QPoint point,
+		not_null<Element*> view) const;
 	[[nodiscard]] HistoryView::SelectedQuote selectedQuote(
 		not_null<HistoryItem*> item) const;
 
@@ -487,6 +520,11 @@ private:
 	bool hasPendingResizedItems() const;
 
 	void addDepersonalized(not_null<Ui::RpWidget*> parent);
+
+	int _accessibilityFocusedIndex = -1;
+	HistoryItem *_accessibilityFocusedItem = nullptr;
+	mutable const HistoryView::Element *_activeColumnsView = nullptr;
+	mutable std::vector<HistoryView::MessageSubItem> _activeColumns;
 
 	const not_null<HistoryWidget*> _widget;
 	const not_null<Ui::ScrollArea*> _scroll;

@@ -828,6 +828,7 @@ OverlayWidget::OverlayWidget()
 #ifdef Q_OS_MAC
 	TouchBar::SetupMediaViewTouchBar(
 		_window->winId(),
+		tr::lng_mediaview_title(tr::now),
 		static_cast<PlaybackControls::Delegate*>(this),
 		_touchbarTrackState.events(),
 		_touchbarDisplay.events(),
@@ -2764,7 +2765,8 @@ void OverlayWidget::assignMediaPointer(DocumentData *document) {
 		_streamedQualityChangeFrame = QImage();
 		_streamedQualityChangeFinished = false;
 		if ((_document = document)) {
-			_quality = Core::App().settings().videoQuality();
+			_quality = _document->initialPlaybackVideoQuality(
+				Core::App().settings().videoQuality());
 			_chosenQuality = _document->chooseQuality(_message, _quality);
 			_documentMedia = _document->createMediaView();
 			_videoCover = LookupVideoCover(_document, _message);
@@ -5290,16 +5292,29 @@ std::vector<VideoQuality> OverlayWidget::playbackControlsQualities() {
 		return {};
 	}
 	auto result = std::vector<VideoQuality>();
-	result.reserve(list.size());
-	for (const auto &quality : list) {
+	result.reserve(list.size() + 1);
+	const auto add = [&](not_null<DocumentData*> quality) {
+		const auto original = (quality == _document);
+		const auto height = original
+			? quality->resolveOriginalVideoQuality()
+			: quality->resolveVideoQuality();
+		if (!height) {
+			return;
+		}
 		const auto value = VideoQuality{
 			.manual = 1u,
-			.height = uint32(quality->resolveVideoQuality()),
-			.original = (quality == _document) ? 1u : 0u,
+			.height = uint32(height),
+			.original = original ? 1u : 0u,
 		};
 		if (!ranges::contains(result, value)) {
 			result.push_back(value);
 		}
+	};
+	if (!_document->filepath(true).isEmpty()) {
+		add(_document);
+	}
+	for (const auto &quality : list) {
+		add(quality);
 	}
 	return result;
 }
@@ -5308,10 +5323,13 @@ VideoQuality OverlayWidget::playbackControlsCurrentQuality() {
 	if (!_chosenQuality) {
 		return _quality;
 	}
+	const auto original = (_chosenQuality == _document);
 	return {
 		.manual = _quality.manual,
-		.height = uint32(_chosenQuality->resolveVideoQuality()),
-		.original = (_chosenQuality == _document) ? 1u : 0u,
+		.height = uint32(original
+			? _chosenQuality->resolveOriginalVideoQuality()
+			: _chosenQuality->resolveVideoQuality()),
+		.original = original ? 1u : 0u,
 	};
 }
 

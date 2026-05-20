@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "dialogs/ui/dialogs_layout.h"
 #include "data/business/data_shortcut_messages.h"
+#include "data/components/credits.h"
 #include "data/components/scheduled_messages.h"
 #include "data/components/sponsored_messages.h"
 #include "data/components/top_peers.h"
@@ -59,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "main/main_session.h"
 #include "window/notifications_manager.h"
+#include "window/window_session_controller.h"
 #include "calls/calls_instance.h"
 #include "spellcheck/spellcheck_types.h"
 #include "storage/localstorage.h"
@@ -792,7 +794,10 @@ not_null<HistoryItem*> History::addNewItem(
 	if (!loadedAtBottom() || peer->migrateTo()) {
 		setLastMessage(item);
 		if (unread) {
-			newItemAdded(item);
+			const auto type = item->out()
+				? NewAddType::Outgoing
+				: NewAddType::RegularIncoming;
+			newItemAdded(item, type);
 		}
 	} else {
 		addNewToBack(item, unread);
@@ -1065,7 +1070,7 @@ not_null<HistoryItem*> History::addNewToBack(
 	}
 	const auto from = item->from();
 	const auto guestMessage = item->Has<HistoryMessageGuestChat>();
-	if (const auto user = guestMessage ? from->asUser() : nullptr) {
+	if (const auto user = guestMessage ? nullptr : from->asUser()) {
 		const auto lastAuthors = [&]() -> std::deque<not_null<UserData*>>* {
 			if (auto chat = peer->asChat()) {
 				return &chat->lastAuthors;
@@ -1164,7 +1169,10 @@ not_null<HistoryItem*> History::addNewToBack(
 
 	setLastMessage(item);
 	if (unread) {
-		newItemAdded(item);
+		const auto type = item->out()
+			? NewAddType::Outgoing
+			: NewAddType::RegularIncoming;
+		newItemAdded(item, type);
 	}
 
 	owner().notifyHistoryChangeDelayed(this);
@@ -1528,6 +1536,15 @@ void History::applyServiceChanges(
 				enabled && item->out(),
 				enabled && !item->out());
 		}
+	}, [&](const MTPDmessageActionPaidMessagesPrice &data) {
+		if (const auto channel = peer->asBroadcast()) {
+			for (const auto &controller : session().windows()) {
+				if (controller->activeChatCurrent().peer() == peer.get()) {
+					channel->updateFullForced();
+					break;
+				}
+			}
+		}
 	}, [](const auto &) {
 	});
 }
@@ -1582,7 +1599,7 @@ void History::mainViewRemoved(
 	}
 }
 
-void History::newItemAdded(not_null<HistoryItem*> item) {
+void History::newItemAdded(not_null<HistoryItem*> item, NewAddType type) {
 	item->indexAsNewItem();
 	item->addToMessagesIndex();
 	if (const auto from = item->from() ? item->from()->asUser() : nullptr) {
@@ -1632,7 +1649,10 @@ void History::newItemAdded(not_null<HistoryItem*> item) {
 			inboxRead(item);
 		}
 	}
-	item->incrementReplyToTopCounter();
+	if (type != NewAddType::StreamedDraftFinish) {
+		// In StreamedDraftFinish setRealId() already incremented this.
+		item->incrementReplyToTopCounter();
+	}
 	if (!folderKnown()) {
 		owner().histories().requestDialogEntry(this);
 	}
@@ -1650,6 +1670,11 @@ void History::newItemAdded(not_null<HistoryItem*> item) {
 					owner().emojiStatuses().refreshCollectibles();
 				}
 			}
+		}
+		if (type == NewAddType::Outgoing
+			&& !item->isLocal()
+			&& media->diceGameOutcome().stakeNanoTon > 0) {
+			session().credits().tonLoad(true);
 		}
 	}
 }

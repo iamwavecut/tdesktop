@@ -13,10 +13,6 @@ class Session;
 
 namespace Ui {
 
-// Schedules `ThanosEffect::WarmUp()` to run once the main dialog list
-// has finished its initial load (or immediately if already loaded).
-// Kept in a separate file so the Ui-only `ThanosEffect` does not need
-// to depend on `Main::Session` / `Data::Session`.
 void ScheduleThanosEffectWarmUp(
 	not_null<Main::Session*> session,
 	rpl::lifetime &lifetime);

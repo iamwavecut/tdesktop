@@ -363,8 +363,6 @@ void PipPanel::init() {
 	widget()->resize(0, 0);
 	widget()->hide();
 
-	// Surface fills the container window, mouse events pass through
-	// to the container for drag/resize/controls handling.
 	_content->rpWidget()->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_window->sizeValue(
 	) | rpl::on_next([=](QSize size) {

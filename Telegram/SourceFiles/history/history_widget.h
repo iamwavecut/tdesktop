@@ -492,6 +492,7 @@ private:
 
 	void showFinished();
 	void updateOverStates(QPoint pos);
+	void clearOverStates();
 	void chooseAttach(std::optional<bool> overrideSendImagesAsPhotos = {});
 	void sendButtonClicked();
 	void newItemAdded(not_null<HistoryItem*> item);

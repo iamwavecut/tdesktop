@@ -83,9 +83,6 @@ Viewport::~Viewport() {
 			ensureBorrowedCleared();
 		}
 	}
-	// Release ownership: _content is a QWidget child of the panel body,
-	// which may already be destroyed by QWidget::deleteChildren().
-	// Let Qt parent-child mechanism handle the lifetime.
 	_content.release();
 }
 

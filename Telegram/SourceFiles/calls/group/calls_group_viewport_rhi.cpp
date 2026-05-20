@@ -293,8 +293,6 @@ bool Viewport::RendererRhi::createPipelines() {
 		{ 0, 2, QRhiVertexInputAttribute::Float2, 4 * sizeof(float) },
 	});
 
-	// Downscale ARGB32: passthrough vert + argb32 frag
-	// argb32.frag needs: s_texture at binding 1, no uniform block
 	_downscaleArgb32Srb = _rhi->newShaderResourceBindings();
 	_downscaleArgb32Srb->setBindings({
 		QRhiShaderResourceBinding::sampledTexture(
@@ -307,8 +305,6 @@ bool Viewport::RendererRhi::createPipelines() {
 		return false;
 	}
 
-	// Downscale YUV420: passthrough vert + yuv420 frag
-	// yuv420.frag needs: y_texture(1), u_texture(2), v_texture(3)
 	_downscaleYuv420Srb = _rhi->newShaderResourceBindings();
 	_downscaleYuv420Srb->setBindings({
 		QRhiShaderResourceBinding::sampledTexture(
@@ -331,8 +327,6 @@ bool Viewport::RendererRhi::createPipelines() {
 		return false;
 	}
 
-	// Blur H: passthrough vert + blur_h frag
-	// blur_h.frag needs: BlurParams at binding 0, b_texture at binding 1
 	_blurHSrb = _rhi->newShaderResourceBindings();
 	_blurHSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
@@ -434,9 +428,6 @@ bool Viewport::RendererRhi::createPipelines() {
 		return false;
 	}
 
-	// Frame composite: group_frame vert + group_frame frag (on-screen)
-	// group_frame.frag needs: uniform block(0), s_texture(1),
-	// b_texture(2), n_texture(3)
 	auto *frameSrb = _rhi->newShaderResourceBindings();
 	frameSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
@@ -482,7 +473,6 @@ bool Viewport::RendererRhi::createPipelines() {
 		return false;
 	}
 
-	// Controls: argb32 vert + controls frag (blending on-screen)
 	auto *controlsSrb = _rhi->newShaderResourceBindings();
 	controlsSrb->setBindings({
 		QRhiShaderResourceBinding::uniformBuffer(
@@ -615,7 +605,6 @@ void Viewport::RendererRhi::render(
 	}
 	renderOffscreen(rhi, rt, cb);
 
-	// Prepare onscreen: accumulate all resource updates into _rub.
 	_nextOnscreenSlot = 0;
 	_onscreenDraws.clear();
 	auto *screenRub = _rhi->nextResourceUpdateBatch();
@@ -624,7 +613,6 @@ void Viewport::RendererRhi::render(
 	}
 	_rub = screenRub;
 	renderOnscreen(rhi, rt, cb);
-	// Apply all accumulated updates via beginPass.
 	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, _rub);
 	_rub = nullptr;
 	const auto pw = float(rt->pixelSize().width());

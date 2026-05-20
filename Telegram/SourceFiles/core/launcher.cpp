@@ -40,17 +40,6 @@ base::options::toggle OptionHighDpiDownscale({
 	.restartRequired = true,
 });
 
-base::options::toggle OptionUseOpenGLRenderer({
-	.id = kOptionUseOpenGLRenderer,
-	.name = "Use OpenGL renderer",
-	.description = "Use the legacy OpenGL rendering backend instead of"
-		" the default Metal/Direct3D/Vulkan (QRhi) backend.",
-	.scope = [] {
-		return QLibraryInfo::version() >= QVersionNumber(6, 7);
-	},
-	.restartRequired = true,
-});
-
 base::options::toggle OptionFreeType({
 	.id = kOptionFreeType,
 	.name = "FreeType font engine",
@@ -315,12 +304,23 @@ base::options::toggle OptionFractionalScalingEnabled({
 	.restartRequired = true,
 });
 
+base::options::toggle OptionUseQtRhi({
+	.id = kOptionUseQtRhi,
+	.name = "Use Qt RHI renderer",
+	.defaultValue = !Platform::IsMac(),
+	.scope = [] {
+		return (!Platform::IsWindows() || Platform::IsWindowsARM64())
+			&& QLibraryInfo::version() >= QVersionNumber(6, 7);
+	},
+	.restartRequired = true,
+});
+
 } // namespace
 
 const char kOptionFractionalScalingEnabled[] = "fractional-scaling-enabled";
 const char kOptionHighDpiDownscale[] = "high-dpi-downscale";
 const char kOptionFreeType[] = "freetype";
-const char kOptionUseOpenGLRenderer[] = "use-opengl-renderer";
+const char kOptionUseQtRhi[] = "use-qt-rhi";
 
 Launcher *Launcher::InstanceSetter::Instance = nullptr;
 
@@ -377,8 +377,16 @@ void Launcher::initHighDpi() {
 		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
 	}
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (!OptionUseOpenGLRenderer.value()) {
-		Platform::SetupQtRhi();
+	if (OptionUseQtRhi.value()) {
+		qputenv("QT_WIDGETS_RHI", "1");
+#ifdef Q_OS_MAC
+		qputenv("QT_WIDGETS_RHI_BACKEND",
+			Platform::MetalSupported() ? "metal" : "opengl");
+#elif defined(Q_OS_WIN)
+		qputenv("QT_WIDGETS_RHI_BACKEND", "d3d11");
+#else
+		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
+#endif
 	}
 #endif // Qt >= 6.7
 

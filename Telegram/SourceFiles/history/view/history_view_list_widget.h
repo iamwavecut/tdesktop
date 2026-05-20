@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "data/data_messages.h"
 #include "history/view/history_view_element.h"
+#include "history/history_inner_widget_accessibility.h"
 #include "history/history_view_highlight_manager.h"
 #include "history/history_view_top_toast.h"
 
@@ -368,6 +369,9 @@ public:
 	[[nodiscard]] bool showCopyRestrictionForSelected();
 	[[nodiscard]] bool hasSelectRestriction() const;
 	[[nodiscard]] Element *lookupItemByY(int y) const;
+	[[nodiscard]] not_null<HistoryItem*> lookupItemByPoint(
+		QPoint point,
+		not_null<Element*> view) const;
 
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
 		int top) const;
@@ -473,6 +477,25 @@ public:
 	void setEmptyInfoWidget(base::unique_qptr<Ui::RpWidget> &&w);
 	void overrideChatMode(std::optional<ElementChatMode> mode);
 
+	// Accessibility.
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::List;
+	}
+	Qt::FocusPolicy accessibilityFocusPolicy() override {
+		return Qt::TabFocus;
+	}
+	int accessibilityChildCount() const override;
+	QString accessibilityChildName(int index) const override;
+	QAccessible::State accessibilityChildState(int index) const override;
+	QAccessible::Role accessibilityChildRole() const override;
+	QRect accessibilityChildRect(int index) const override;
+	int accessibilityChildColumnCount(int row) const override;
+	QAccessible::Role accessibilityChildSubItemRole() const override;
+	QString accessibilityChildSubItemName(
+		int row, int column) const override;
+	QString accessibilityChildSubItemValue(
+		int row, int column) const override;
+
 	~ListWidget();
 
 protected:
@@ -483,6 +506,7 @@ protected:
 	bool eventHook(QEvent *e) override; // calls touchEvent when necessary
 	void touchEvent(QTouchEvent *e);
 	void paintEvent(QPaintEvent *e) override;
+	void focusInEvent(QFocusEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
@@ -507,6 +531,15 @@ private:
 	using ViewsMap = base::flat_map<
 		not_null<HistoryItem*>,
 		std::unique_ptr<Element>>;
+
+	[[nodiscard]] std::vector<Element*> accessibleElements() const;
+	[[nodiscard]] int accessibilityUnreadBarIndex() const;
+	void toggleMessageSelection();
+	void playPauseFocusedMedia();
+	void setAccessibilityFocusedItem(int index, HistoryItem *item);
+	void announceAccessibilityFocus(int index);
+	[[nodiscard]] auto computeActiveColumns(int row) const
+		-> const std::vector<HistoryView::MessageSubItem> &;
 
 	struct MouseState {
 		MouseState();
@@ -875,6 +908,11 @@ private:
 	bool _showFinished = false;
 	bool _resizePending = false;
 	std::optional<ElementChatMode> _overrideChatMode;
+
+	int _accessibilityFocusedIndex = -1;
+	HistoryItem *_accessibilityFocusedItem = nullptr;
+	mutable const HistoryView::Element *_activeColumnsView = nullptr;
+	mutable std::vector<HistoryView::MessageSubItem> _activeColumns;
 
 	// _menu must be destroyed before _whoReactedMenuLifetime.
 	rpl::lifetime _whoReactedMenuLifetime;

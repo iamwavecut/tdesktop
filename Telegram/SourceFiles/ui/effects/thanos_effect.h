@@ -35,11 +35,11 @@ public:
 	void raise();
 
 	[[nodiscard]] static bool Supported();
-	// Runs the (potentially slow, 10–300ms) QRhi+offscreen-surface probe
+	// Runs the (potentially slow, 10–300ms) QRhi capability probe
 	// synchronously on the main thread and caches the result. Safe to
 	// call multiple times. If not called, `Supported()` will lazily
 	// probe on first use — prefer warming it up during idle time so the
-	// first Thanos-triggering click doesn't hitch.
+	// first message deletion doesn't hitch.
 	static void WarmUp();
 
 private:
@@ -52,7 +52,7 @@ private:
 	const not_null<QWidget*> _parent;
 
 	std::unique_ptr<RpWidgetWrap> _surface;
-	ThanosEffectRenderer *_renderer = nullptr;
+	[[maybe_unused]] ThanosEffectRenderer *_renderer = nullptr;
 
 	QTimer *_updateTimer = nullptr;
 

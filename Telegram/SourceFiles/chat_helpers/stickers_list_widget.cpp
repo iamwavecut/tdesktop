@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_multi_player.h"
 #include "lottie/lottie_single_player.h"
 #include "lottie/lottie_animation.h"
+#include "boxes/share_box.h"
 #include "boxes/stickers_box.h"
 #include "inline_bots/inline_bot_result.h"
 #include "storage/storage_account.h"
@@ -44,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_set_box.h"
 #include "boxes/stickers_box.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/text/text_entity.h"
 #include "ui/painter.h"
 #include "window/window_session_controller.h" // GifPauseReason.
 #include "main/main_session.h"
@@ -2511,7 +2513,7 @@ void StickersListWidget::showStickerSetBox(
 		not_null<DocumentData*> document,
 		uint64 setId) {
 	if (document->sticker() && document->sticker()->set) {
-		checkHideWithBox(Box<StickerSetBox>(
+		showBoxPreventHide(Box<StickerSetBox>(
 			_show,
 			document->sticker()->set,
 			document->sticker()->setType));
@@ -2542,6 +2544,15 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 	auto &sets = shownSets();
 	if (v::is_null(selected) || !v::is_null(_pressed)) {
 		return nullptr;
+	}
+	if (const auto setOver = std::get_if<OverSet>(&selected)) {
+		Assert(setOver->section >= 0 && setOver->section < sets.size());
+		return fillSetContextMenu(sets[setOver->section]);
+	}
+	if (const auto shortcut = std::get_if<OverSearchShortcut>(&selected)) {
+		Assert(shortcut->index >= 0
+			&& shortcut->index < _searchShortcutSets.size());
+		return fillSetContextMenu(_searchShortcutSets[shortcut->index]);
 	}
 	const auto sticker = std::get_if<OverSticker>(&selected);
 	if (!sticker) {
@@ -2613,6 +2624,94 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 		details,
 		SendMenu::DefaultCallback(_show, send));
 
+	return menu;
+}
+
+base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillSetContextMenu(
+		const Set &set) {
+	if (!set.set) {
+		return nullptr;
+	}
+	return FillStickerSetContextMenu(
+		this,
+		_show,
+		set.set,
+		_localSetsManager.get(),
+		crl::guard(this, [this](uint64 id) { removeSet(id); }),
+		crl::guard(this, [this] { update(); }),
+		st().menu);
+}
+
+base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
+		not_null<QWidget*> parent,
+		std::shared_ptr<Show> show,
+		not_null<Data::StickersSet*> set,
+		not_null<LocalStickersManager*> localSetsManager,
+		Fn<void(uint64 setId)> remove,
+		Fn<void()> repaint,
+		const style::PopupMenu &menuSt) {
+	if (set->shortName.isEmpty()
+		|| (set->id == Data::Stickers::MegagroupSetId)
+		|| (set->id == Data::Stickers::CollectibleSetId)) {
+		return nullptr;
+	}
+	const auto type = set->type();
+	const auto isEmoji = (type == Data::StickersType::Emoji);
+	const auto isMasks = (type == Data::StickersType::Masks);
+	const auto part = isEmoji ? u"addemoji"_q : u"addstickers"_q;
+	const auto session = &set->session();
+	const auto url = session->createInternalLinkFull(
+		part + '/' + set->shortName);
+	const auto setId = set->id;
+	const auto installed = SetInMyList(set->flags);
+	const auto inMyList = installed
+		|| localSetsManager->isInstalledLocally(setId);
+
+	auto menu = base::make_unique_q<Ui::PopupMenu>(parent, menuSt);
+	if (!inMyList) {
+		menu->addAction(
+			(isEmoji
+				? tr::lng_stickers_add_emoji
+				: isMasks
+				? tr::lng_stickers_add_masks
+				: tr::lng_stickers_add_pack)(tr::now),
+			[=] {
+				localSetsManager->install(setId);
+				if (isMasks) {
+					show->showToast(tr::lng_masks_installed(tr::now));
+				} else if (isEmoji) {
+					session->data().stickers().notifyEmojiSetInstalled(
+						setId);
+				} else {
+					session->data().stickers().notifyStickerSetInstalled(
+						setId);
+				}
+				if (repaint) {
+					repaint();
+				}
+			},
+			&st::menuIconAdd);
+	}
+	menu->addAction(
+		tr::lng_chat_link_share(tr::now),
+		[=] { FastShareLink(show, url); },
+		&st::menuIconShare);
+	menu->addAction(
+		tr::lng_context_copy_link(tr::now),
+		[=] {
+			TextUtilities::SetClipboardText(TextForMimeData::Simple(url));
+			show->showToast(isEmoji
+				? tr::lng_stickers_copied_emoji(tr::now)
+				: tr::lng_stickers_copied(tr::now));
+		},
+		&st::menuIconLink);
+	if (installed) {
+		menu->addSeparator();
+		menu->addAction(
+			tr::lng_stickers_remove_pack_confirm(tr::now),
+			[=] { remove(setId); },
+			&st::menuIconDelete);
+	}
 	return menu;
 }
 
@@ -3452,7 +3551,10 @@ void StickersListWidget::updateSelected() {
 					&& myrtlrect(featuredAddRect(info, false)).contains(p)) {
 				newSelected = OverButton{ section };
 			} else if (_features.openStickerSets
-				&& !(sets[section].flags & SetFlag::Special)) {
+				&& (!(sets[section].flags & SetFlag::Special)
+					|| (_section == Section::Search
+						&& sets[section].id == _searchSelectedSetId
+						&& _searchSelectedSetId != 0))) {
 				newSelected = OverSet{ section };
 			} else if ((sets[section].id == Data::Stickers::MegagroupSetId)
 				&& (_megagroupSet->canEditStickers()
@@ -3726,7 +3828,8 @@ void StickersListWidget::displaySet(uint64 setId) {
 	if (setId == Data::Stickers::MegagroupSetId) {
 		if (_megagroupSet->canEditStickers()) {
 			const auto isEmoji = false;
-			checkHideWithBox(Box<StickersBox>(_show, _megagroupSet, isEmoji));
+			showBoxPreventHide(
+				Box<StickersBox>(_show, _megagroupSet, isEmoji));
 			return;
 		} else if (_megagroupSet->mgInfo->stickerSet.id) {
 			setId = _megagroupSet->mgInfo->stickerSet.id;
@@ -3737,7 +3840,7 @@ void StickersListWidget::displaySet(uint64 setId) {
 	const auto &sets = session().data().stickers().sets();
 	auto it = sets.find(setId);
 	if (it != sets.cend()) {
-		checkHideWithBox(Box<StickerSetBox>(_show, it->second.get()));
+		showBoxPreventHide(Box<StickerSetBox>(_show, it->second.get()));
 	}
 }
 
@@ -3748,7 +3851,7 @@ void StickersListWidget::removeMegagroupSet(bool locally) {
 		refreshStickers();
 		return;
 	}
-	checkHideWithBox(Ui::MakeConfirmBox({
+	showBoxPreventHide(Ui::MakeConfirmBox({
 		.text = tr::lng_stickers_remove_group_set(),
 		.confirmed = crl::guard(this, [this, group = _megagroupSet](
 				Fn<void()> &&close) {
@@ -3774,7 +3877,7 @@ void StickersListWidget::removeSet(uint64 setId) {
 			|| !_megagroupSet->canEditStickers();
 		removeMegagroupSet(removeLocally);
 	} else if (auto box = MakeConfirmRemoveSetBox(&session(), st, setId)) {
-		checkHideWithBox(std::move(box));
+		showBoxPreventHide(std::move(box));
 	}
 }
 

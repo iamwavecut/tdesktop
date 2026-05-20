@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_metal_texture.h"
 
 #ifdef Q_OS_MAC
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 
 #include <CoreVideo/CoreVideo.h>
 #include <Metal/Metal.h>
@@ -168,4 +169,5 @@ void MetalTextureCache::flush() {
 
 } // namespace Media::View
 
+#endif // Qt >= 6.7
 #endif // Q_OS_MAC

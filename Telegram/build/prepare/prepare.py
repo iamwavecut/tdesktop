@@ -456,7 +456,9 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout dbac5a484563cac1788feac49834bd90292feaa2
+    git checkout 30831e63f41907f6dca32eab9ad96ac0bdb88f03
+mac:
+    git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
 """)
 
 if 'win7' in options:
@@ -1123,10 +1125,8 @@ depends:python/Scripts/activate.bat
     %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
     meson setup --default-library=static --buildtype=debug -Db_vscrt=mtd out/Debug
     meson compile -C out/Debug
-release:
     meson setup --default-library=static --buildtype=release -Db_vscrt=mt out/Release
     meson compile -C out/Release
-win:
     deactivate
 mac:
     buildOneArch() {
@@ -1568,43 +1568,13 @@ win:
     if not exist qtsvg\\mkspecs\\modules-inst mkdir qtsvg\\mkspecs\\modules-inst
     jom -j%NUMBER_OF_PROCESSORS%
     jom -j%NUMBER_OF_PROCESSORS% install
-mac:
-    QT_MAJOR_MINOR=$(echo $QT | grep -oE '^[0-9]+\\.[0-9]+')
-    if [ -d "../../patches/qt6_highsierra/$QT_MAJOR_MINOR" ]; then
-        find "../../patches/qt6_highsierra/$QT_MAJOR_MINOR" -type f -print0 | sort -z | xargs -0 git apply
-    fi
-    find ../../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply
-    cd ..
-
-    CONFIGURATIONS=-debug
-release:
-    CONFIGURATIONS=-debug-and-release
-mac:
-    ./configure -prefix "$USED_PREFIX/Qt-$QT" \
-        $CONFIGURATIONS \
-        -force-debug-info \
-        -opensource \
-        -confirm-license \
-        -static \
-        -opengl desktop \
-        -no-openssl \
-        -securetransport \
-        -I "$USED_PREFIX/include" \
-        LIBJPEG_LIBS="$USED_PREFIX/lib/libjpeg.a" \
-        ZLIB_LIBS="$USED_PREFIX/lib/libz.a" \
-        -nomake examples \
-        -nomake tests \
-        -platform macx-clang
-
-    make $MAKE_THREADS_CNT
-    make install
 """)
 else: # qt > '6'
     branch = 'v$QT' + ('-lts-lgpl' if qt.startswith('6.2.') else '')
     stage('qt_' + qt, """
     git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
     cd qt_$QT
-    git submodule update --init --recursive --progress qtbase qtimageformats qtsvg qtshadertools
+    git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
 mac:
     QT_MAJOR_MINOR=$(echo $QT | grep -oE '^[0-9]+\\.[0-9]+')
