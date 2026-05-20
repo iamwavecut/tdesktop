@@ -133,6 +133,13 @@ struct HistoryMessageEdited
 	TimeId date = 0;
 };
 
+struct HistoryMessageMediaForInstantView
+: RuntimeComponent<HistoryMessageMediaForInstantView, HistoryItem> {
+	QString url;
+	base::flat_set<not_null<DocumentData*>> documents;
+	base::flat_set<not_null<PhotoData*>> photos;
+};
+
 struct HistoryMessageDeleted
 : RuntimeComponent<HistoryMessageDeleted, HistoryItem> {
 	TimeId date = 0;

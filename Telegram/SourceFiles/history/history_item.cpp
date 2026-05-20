@@ -82,6 +82,7 @@ namespace {
 
 constexpr auto kNotificationTextLimit = 255;
 constexpr auto kPinnedMessageTextLimit = 16;
+constexpr auto kMinLoginCode = 5;
 constexpr auto kRevisionStoreVersion = qint32(1);
 constexpr auto kLocallyHiddenStoreVersion = qint32(1);
 
