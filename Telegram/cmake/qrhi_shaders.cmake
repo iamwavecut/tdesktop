@@ -7,10 +7,17 @@ if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
     return()
 endif()
 
+if (QT_VERSION_MAJOR LESS 6)
+    return()
+endif()
+
 set(_qsb_hints
     "${QT_DIR}/../../../libexec"
     "${QT_DIR}/../../../bin"
-    "${QT_DIR}/../../../share/qt/libexec")
+    "${QT_DIR}/../../qt6/libexec"
+    "${QT_DIR}/../../qt6/bin"
+    "${QT_DIR}/../../../share/qt/libexec"
+    "${QT_DIR}/../../../opt/qtshadertools/bin")
 find_program(QSB_EXECUTABLE qsb
     HINTS ${_qsb_hints}
     PATHS ENV PATH)
@@ -34,20 +41,12 @@ if (NOT QSB_EXECUTABLE)
     endif()
 endif()
 
-if (QSB_EXECUTABLE)
-    set(_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
-    set(_qsb_out_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
-    file(MAKE_DIRECTORY ${_qsb_out_dir})
-    file(GLOB _shader_sources
-        "${_shader_dir}/*.vert"
-        "${_shader_dir}/*.frag"
-        "${_shader_dir}/*.comp")
-    set(_qsb_outputs)
-    set(_qrc_entries)
-    foreach(_src ${_shader_sources})
-        get_filename_component(_name ${_src} NAME)
-        get_filename_component(_ext ${_src} LAST_EXT)
-        set(_qsb "${_qsb_out_dir}/${_name}.qsb")
+if (NOT QSB_EXECUTABLE)
+    message(FATAL_ERROR
+        "QSB (Qt Shader Baker) was not found, but ${CMAKE_CURRENT_SOURCE_DIR}/shaders "
+        "is present and must be compiled. Install Qt's shader tools or extend "
+        "QSB_EXECUTABLE hints in cmake/qrhi_shaders.cmake.")
+endif()
 
 set(_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(_qsb_out_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
