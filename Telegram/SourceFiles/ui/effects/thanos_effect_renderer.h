@@ -10,7 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rhi/rhi_renderer.h"
 #include "ui/gl/gl_surface.h"
 
-#include <QElapsedTimer>
 #include <QImage>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
@@ -36,7 +35,8 @@ class ThanosEffectRenderer final
 	: public GL::Renderer
 	, public Rhi::Renderer {
 public:
-	ThanosEffectRenderer();
+	explicit ThanosEffectRenderer(
+		rpl::producer<float64> devicePixelRatio);
 	~ThanosEffectRenderer();
 
 	[[nodiscard]] static bool Available();
@@ -68,7 +68,9 @@ private:
 	struct AnimatingItem {
 		QRhiTexture *texture = nullptr;
 		QRhiSampler *sampler = nullptr;
-		QRhiBuffer *particleBuffer = nullptr;
+		QRhiTexture *particleStateTexture = nullptr;
+		QRhiTexture *particleVelocityTexture = nullptr;
+		QRhiSampler *particleStateSampler = nullptr;
 		QRhiBuffer *computeInitUniformBuffer = nullptr;
 		QRhiBuffer *computeUpdateUniformBuffer = nullptr;
 		QRhiBuffer *renderUniformBuffer = nullptr;
@@ -79,8 +81,9 @@ private:
 		QRectF rect;
 		uint32_t particleCountX = 0;
 		uint32_t particleCountY = 0;
-		float phase = 0.f;
+		float64 phase = 0.;
 		bool particlesInitialized = false;
+		bool needsInitDispatch = false;
 	};
 
 	[[nodiscard]] bool createPipelines(QRhiRenderTarget *rt);
@@ -89,15 +92,17 @@ private:
 	void destroyAnimatingItem(AnimatingItem &item);
 
 	QRhi *_rhi = nullptr;
+	float64 _factor = 1.;
 
 	QRhiBuffer *_quadVertexBuffer = nullptr;
 	QRhiBuffer *_computeInitUniformBuffer = nullptr;
 	QRhiBuffer *_computeUpdateUniformBuffer = nullptr;
 	QRhiBuffer *_renderUniformBuffer = nullptr;
 
-	QRhiBuffer *_placeholderParticleBuffer = nullptr;
 	QRhiTexture *_placeholderTexture = nullptr;
 	QRhiSampler *_placeholderSampler = nullptr;
+	QRhiTexture *_placeholderStateTexture = nullptr;
+	QRhiSampler *_placeholderStateSampler = nullptr;
 
 	QRhiShaderResourceBindings *_computeInitSrbLayout = nullptr;
 	QRhiShaderResourceBindings *_computeUpdateSrbLayout = nullptr;
@@ -110,12 +115,13 @@ private:
 	std::vector<AnimatingItem> _items;
 	std::vector<ThanosItem> _pendingItems;
 
-	QElapsedTimer _elapsed;
-	double _lastFrameTime = 0.;
+	crl::time _lastFrameTime = 0;
 	bool _initialized = false;
+	bool _creationFailed = false;
 	uint32_t _seedCounter = 0;
 
 	rpl::event_stream<> _allDone;
+	rpl::lifetime _lifetime;
 
 };
 

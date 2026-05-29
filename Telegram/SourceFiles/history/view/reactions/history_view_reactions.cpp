@@ -713,7 +713,7 @@ void InlineList::paintSingleBg(
 		float64 opacity) const {
 	p.setOpacity(opacity);
 	if (!areTags()) {
-		const auto radius = fill.height() / 2.;
+		const auto radius = style::SquareUserpics() ? 0. : (fill.height() / 2.);
 		p.setBrush(color);
 		p.drawRoundedRect(fill, radius, radius);
 		return;
@@ -805,7 +805,7 @@ void InlineList::clickHandlerPressedChanged(
 				}
 				return Ui::RippleAnimation::RoundRectMask(
 					geometry.size(),
-					geometry.height() / 2);
+					style::SquareUserpics() ? 0 : (geometry.height() / 2));
 			}();
 			_ripple = std::make_unique<RippleEffect>(
 				st::defaultRippleAnimation,

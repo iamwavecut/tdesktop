@@ -527,9 +527,13 @@ stage('lzma', """
 win:
     git clone https://github.com/desktop-app/lzma.git
     cd lzma\\C\\Util\\LzmaLib
-    msbuild -m LzmaLib.sln /property:Configuration=Debug /property:Platform="$X8664"
+    SET "ToolsetProp="
+winarm:
+    SET "ToolsetProp=/property:PlatformToolset=v145"
+win:
+    msbuild -m LzmaLib.sln /property:Configuration=Debug /property:Platform="$X8664" %ToolsetProp%
 release:
-    msbuild -m LzmaLib.sln /property:Configuration=Release /property:Platform="$X8664"
+    msbuild -m LzmaLib.sln /property:Configuration=Release /property:Platform="$X8664" %ToolsetProp%
 """)
 
 stage('xz', """
@@ -1396,10 +1400,12 @@ depends:patches/breakpad.diff
 win:
     SET "PYTHONUTF8=1"
     SET "FolderPostfix="
+    SET "ToolsetProp="
 win64:
     SET "FolderPostfix=_x64"
 winarm:
     SET "FolderPostfix=_ARM64"
+    SET "ToolsetProp=/property:PlatformToolset=v145"
 win:
 depends:python/Scripts/activate.bat
     %THIRDPARTY_DIR%\\python\\Scripts\\activate.bat
@@ -1411,7 +1417,7 @@ release:
     ninja -C out/Release%FolderPostfix% common crash_generation_client exception_handler
     cd tools\\windows\\dump_syms
     gyp dump_syms.gyp --format=msvs
-    msbuild -m dump_syms.vcxproj /property:Configuration=Release /property:Platform="x64"
+    msbuild -m dump_syms.vcxproj /property:Configuration=Release /property:Platform="x64" %ToolsetProp%
 win:
     deactivate
 mac:

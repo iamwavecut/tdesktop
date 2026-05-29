@@ -20,20 +20,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 namespace {
 
-constexpr auto kParticleStride = int(24);
 constexpr auto kQuadVertexCount = int(6);
 constexpr auto kQuadVertexStride = int(2 * sizeof(float));
 constexpr auto kComputeWorkgroupSize = int(64);
-constexpr auto kMaxPhaseDuration = 6.0f;
-constexpr auto kPhaseSpeed = 1.65f;
-constexpr auto kTimeStepMultiplier = 1.65f;
-constexpr auto kAccelerationStartPhase = 1.0f;
-constexpr auto kAccelerationRampPhase = 2.5f;
-constexpr auto kAccelerationMaxMultiplier = 2.2f;
-constexpr auto kDisappearStartPhase = kMaxPhaseDuration * 0.15f;
+constexpr auto kMaxPhaseDuration = float64(6.);
+constexpr auto kPhaseSpeed = float64(1.65);
+constexpr auto kTimeStepMultiplier = float64(1.65);
+constexpr auto kAccelerationStartPhase = float64(1.);
+constexpr auto kAccelerationRampPhase = float64(2.5);
+constexpr auto kAccelerationMaxMultiplier = float64(2.2);
+constexpr auto kDisappearStartPhase = kMaxPhaseDuration * 0.15;
 constexpr auto kDisappearDuration
 	= kMaxPhaseDuration - kDisappearStartPhase;
 constexpr auto kMaxParticleCount = uint32_t(120000);
+static_assert(kMaxParticleCount < (1u << 30));
 
 const float kQuadVertices[kQuadVertexCount * 2] = {
 	0.f, 0.f,
@@ -68,26 +68,25 @@ struct alignas(16) RenderUniforms {
 };
 static_assert(sizeof(RenderUniforms) % 16 == 0);
 
-[[nodiscard]] float AnimationSpeedMultiplier(float phase) {
+[[nodiscard]] float64 AnimationSpeedMultiplier(float64 phase) {
 	if (phase <= kAccelerationStartPhase) {
-		return 1.0f;
+		return 1.;
 	}
 	const auto t = std::clamp(
 		(phase - kAccelerationStartPhase) / kAccelerationRampPhase,
-		0.0f,
-		1.0f);
-	const auto smooth = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
-	return 1.0f
-		+ ((kAccelerationMaxMultiplier - 1.0f) * smooth);
+		0.,
+		1.);
+	const auto smooth = t * t * t * (t * (t * 6. - 15.) + 10.);
+	return 1. + ((kAccelerationMaxMultiplier - 1.) * smooth);
 }
 
-[[nodiscard]] float DisappearProgress(float phase) {
+[[nodiscard]] float64 DisappearProgress(float64 phase) {
 	const auto t = std::clamp(
 		(phase - kDisappearStartPhase) / kDisappearDuration,
-		0.0f,
-		1.0f);
-	const auto oneMinus = 1.0f - t;
-	return 1.0f - (oneMinus * oneMinus * oneMinus);
+		0.,
+		1.);
+	const auto oneMinus = 1. - t;
+	return 1. - (oneMinus * oneMinus * oneMinus);
 }
 
 [[nodiscard]] QShader LoadShader(const QString &name) {
@@ -121,7 +120,16 @@ void ThanosEffectRenderer::initialize(
 	if (_initialized && _rhi == rhi) {
 		return;
 	}
+	// A different rhi instance (fresh setup or post device-lost recovery)
+	// is a chance to retry pipeline creation; only an in-place repeat with
+	// the same instance keeps the sticky failure.
+	if (_rhi != rhi) {
+		_creationFailed = false;
+	}
 	releaseResources();
+	if (_creationFailed) {
+		return;
+	}
 	_rhi = rhi;
 
 	if (!rhi->isFeatureSupported(QRhi::Compute)) {
@@ -153,12 +161,6 @@ void ThanosEffectRenderer::initialize(
 		sizeof(RenderUniforms));
 	_renderUniformBuffer->create();
 
-	_placeholderParticleBuffer = rhi->newBuffer(
-		QRhiBuffer::Immutable,
-		QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
-		kParticleStride);
-	_placeholderParticleBuffer->create();
-
 	_placeholderTexture = rhi->newTexture(
 		QRhiTexture::RGBA8,
 		QSize(1, 1));
@@ -188,7 +190,7 @@ void ThanosEffectRenderer::initialize(
 	cb->resourceUpdate(rub);
 
 	_initialized = true;
-	_lastFrameTime = double(_elapsed.elapsed()) / 1000.0;
+	_lastFrameTime = crl::now();
 
 	LOG(("ThanosEffect: initialized, backend=%1 device=%2")
 		.arg(rhi->backendName())
@@ -263,6 +265,11 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 			QRhiShaderResourceBinding::FragmentStage,
 			_placeholderTexture,
 			_placeholderSampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::VertexStage,
+			_placeholderStateTexture,
+			_placeholderStateSampler),
 	});
 	if (!_renderSrbLayout->create()) {
 		return false;
@@ -277,13 +284,9 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	QRhiVertexInputLayout inputLayout;
 	inputLayout.setBindings({
 		{ quint32(kQuadVertexStride) },
-		{ quint32(kParticleStride),
-			QRhiVertexInputBinding::PerInstance },
 	});
 	inputLayout.setAttributes({
 		{ 0, 0, QRhiVertexInputAttribute::Float2, 0 },
-		{ 1, 1, QRhiVertexInputAttribute::Float2, 0 },
-		{ 1, 2, QRhiVertexInputAttribute::Float, 16 },
 	});
 	_renderPipeline->setVertexInputLayout(inputLayout);
 
@@ -306,13 +309,23 @@ void ThanosEffectRenderer::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (rhi->isDeviceLost()) {
+		_pendingItems.clear();
+		releaseResources();
+		return;
+	}
 	if (!_initialized || !rhi->isFeatureSupported(QRhi::Compute)) {
+		_pendingItems.clear();
 		return;
 	}
 	_rhi = rhi;
 
-	const auto now = double(_elapsed.elapsed()) / 1000.0;
-	const auto dt = float(std::clamp(now - _lastFrameTime, 0.001, 0.1));
+	const auto now = crl::now();
+	// Cap to ~15 FPS so a single slow frame cannot teleport particles.
+	const auto dt = std::clamp(
+		now - _lastFrameTime,
+		crl::time(1),
+		crl::time(66)) / 1000.;
 	_lastFrameTime = now;
 
 	addPendingItems(cb);
@@ -322,9 +335,8 @@ void ThanosEffectRenderer::render(
 	}
 
 	const auto pixelSize = rt->pixelSize();
-	const auto factor = style::DevicePixelRatio();
-	const auto viewW = float(pixelSize.width()) / factor;
-	const auto viewH = float(pixelSize.height()) / factor;
+	const auto viewW = float64(pixelSize.width()) / _factor;
+	const auto viewH = float64(pixelSize.height()) / _factor;
 
 	{
 		auto *rub = rhi->nextResourceUpdateBatch();
@@ -340,6 +352,7 @@ void ThanosEffectRenderer::render(
 			if (!item.particlesInitialized) {
 				needsInit = true;
 				item.particlesInitialized = true;
+				item.needsInitDispatch = true;
 
 				ComputeInitUniforms uni;
 				uni.particleCountX = item.particleCountX;
@@ -356,8 +369,9 @@ void ThanosEffectRenderer::render(
 			ComputeUpdateUniforms updateUni;
 			updateUni.particleCountX = item.particleCountX;
 			updateUni.particleCountY = item.particleCountY;
-			updateUni.phase = item.phase;
-			updateUni.timeStep = animationTimeStep * kTimeStepMultiplier;
+			updateUni.phase = float(item.phase);
+			updateUni.timeStep = float(
+				animationTimeStep * kTimeStepMultiplier);
 			rub->updateDynamicBuffer(
 				item.computeUpdateUniformBuffer,
 				0,
@@ -365,23 +379,27 @@ void ThanosEffectRenderer::render(
 				&updateUni);
 		}
 
-		cb->beginComputePass(rub);
-
 		if (needsInit) {
+			cb->beginComputePass(rub);
+			rub = nullptr;
 			for (auto &item : _items) {
-				if (item.phase <= dt * kPhaseSpeed * 1.1f) {
-					cb->setComputePipeline(_computeInitPipeline);
-					cb->setShaderResources(item.computeInitSrb);
-					const auto count =
-						item.particleCountX * item.particleCountY;
-					const auto groups =
-						(count + kComputeWorkgroupSize - 1)
-						/ kComputeWorkgroupSize;
-					cb->dispatch(int(groups), 1, 1);
+				if (!item.needsInitDispatch) {
+					continue;
 				}
+				item.needsInitDispatch = false;
+				cb->setComputePipeline(_computeInitPipeline);
+				cb->setShaderResources(item.computeInitSrb);
+				const auto count =
+					item.particleCountX * item.particleCountY;
+				const auto groups =
+					(count + kComputeWorkgroupSize - 1)
+					/ kComputeWorkgroupSize;
+				cb->dispatch(int(groups), 1, 1);
 			}
+			cb->endComputePass();
 		}
 
+		cb->beginComputePass(rub);
 		for (auto &item : _items) {
 			if (item.phase >= kMaxPhaseDuration) {
 				continue;
@@ -393,7 +411,6 @@ void ThanosEffectRenderer::render(
 				/ kComputeWorkgroupSize;
 			cb->dispatch(int(groups), 1, 1);
 		}
-
 		cb->endComputePass();
 	}
 
@@ -404,21 +421,21 @@ void ThanosEffectRenderer::render(
 				continue;
 			}
 			RenderUniforms uni;
-			uni.rect[0] = float(item.rect.x()) / viewW;
-			uni.rect[1] = (viewH - float(item.rect.y())
-				- float(item.rect.height())) / viewH;
-			uni.rect[2] = float(item.rect.width()) / viewW;
-			uni.rect[3] = float(item.rect.height()) / viewH;
+			uni.rect[0] = float(item.rect.x() / viewW);
+			uni.rect[1] = float(
+				(viewH - item.rect.y() - item.rect.height()) / viewH);
+			uni.rect[2] = float(item.rect.width() / viewW);
+			uni.rect[3] = float(item.rect.height() / viewH);
 			uni.size[0] = float(item.rect.width());
 			uni.size[1] = float(item.rect.height());
 			uni.particleResolution[0] = item.particleCountX;
 			uni.particleResolution[1] = item.particleCountY;
-			const auto disappearProgress = DisappearProgress(item.phase);
-			const auto inverseDisappear = 1.0f - disappearProgress;
+			const auto inverseDisappear = float(
+				1. - DisappearProgress(item.phase));
 			uni.scale[0] = inverseDisappear;
-			uni.scale[1] = 0.0f;
+			uni.scale[1] = 0.;
 			uni.scale[2] = inverseDisappear;
-			uni.scale[3] = 0.0f;
+			uni.scale[3] = 0.;
 
 			renderRub->updateDynamicBuffer(
 				item.renderUniformBuffer,
@@ -443,9 +460,8 @@ void ThanosEffectRenderer::render(
 
 			const QRhiCommandBuffer::VertexInput vbufs[] = {
 				{ _quadVertexBuffer, 0 },
-				{ item.particleBuffer, 0 },
 			};
-			cb->setVertexInput(0, 2, vbufs);
+			cb->setVertexInput(0, 1, vbufs);
 
 			const auto instanceCount =
 				item.particleCountX * item.particleCountY;
@@ -455,22 +471,11 @@ void ThanosEffectRenderer::render(
 		cb->endPass();
 	}
 
-	// Remove finished items using deleteLater() so QRhi resources
-	// survive until the command buffer is fully submitted.
 	auto hadItems = !_items.empty();
 	_items.erase(
 		std::remove_if(_items.begin(), _items.end(), [&](auto &item) {
 			if (item.phase >= kMaxPhaseDuration) {
-				if (item.renderSrb) item.renderSrb->deleteLater();
-				if (item.computeUpdateSrb) item.computeUpdateSrb->deleteLater();
-				if (item.computeInitSrb) item.computeInitSrb->deleteLater();
-				if (item.renderUniformBuffer) item.renderUniformBuffer->deleteLater();
-				if (item.computeUpdateUniformBuffer) item.computeUpdateUniformBuffer->deleteLater();
-				if (item.computeInitUniformBuffer) item.computeInitUniformBuffer->deleteLater();
-				if (item.particleBuffer) item.particleBuffer->deleteLater();
-				if (item.sampler) item.sampler->deleteLater();
-				if (item.texture) item.texture->deleteLater();
-				item = {};
+				destroyAnimatingItem(item);
 				return true;
 			}
 			return false;
@@ -539,21 +544,23 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		result.particleCountX = uint32_t(w);
 		result.particleCountY = uint32_t(h);
 	} else {
-		const auto aspectRatio = float(w) / float(h);
-		result.particleCountY = uint32_t(
-			std::sqrt(float(kMaxParticleCount) / aspectRatio));
-		result.particleCountX = uint32_t(
-			float(kMaxParticleCount) / float(result.particleCountY));
-		if (result.particleCountX < 1) result.particleCountX = 1;
-		if (result.particleCountY < 1) result.particleCountY = 1;
+		const auto aspectRatio = float64(w) / float64(h);
+		const auto maxParticles = float64(kMaxParticleCount);
+		result.particleCountY = std::max(
+			uint32_t(1),
+			uint32_t(std::sqrt(maxParticles / aspectRatio)));
+		result.particleCountX = std::max(
+			uint32_t(1),
+			uint32_t(maxParticles / float64(result.particleCountY)));
 	}
-	const auto particleCount =
-		result.particleCountX * result.particleCountY;
 
 	auto *tex = _rhi->newTexture(
 		QRhiTexture::RGBA8,
 		QSize(item.snapshot.width(), item.snapshot.height()));
-	tex->create();
+	if (!tex->create()) {
+		delete tex;
+		return result;
+	}
 	result.texture = tex;
 
 	result.uploadImage = item.snapshot.convertToFormat(
@@ -565,40 +572,88 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		QRhiSampler::None,
 		QRhiSampler::ClampToEdge,
 		QRhiSampler::ClampToEdge);
-	sampler->create();
+	if (!sampler->create()) {
+		delete sampler;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.sampler = sampler;
 
-	auto *particleBuf = _rhi->newBuffer(
-		QRhiBuffer::Static,
-		QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
-		particleCount * kParticleStride);
-	particleBuf->create();
-	result.particleBuffer = particleBuf;
+	auto *stateTex = _rhi->newTexture(
+		QRhiTexture::RGBA32F,
+		QSize(int(result.particleCountX), int(result.particleCountY)),
+		1,
+		QRhiTexture::UsedWithLoadStore);
+	if (!stateTex->create()) {
+		delete stateTex;
+		destroyAnimatingItem(result);
+		return result;
+	}
+	result.particleStateTexture = stateTex;
+
+	auto *velocityTex = _rhi->newTexture(
+		QRhiTexture::RGBA32F,
+		QSize(int(result.particleCountX), int(result.particleCountY)),
+		1,
+		QRhiTexture::UsedWithLoadStore);
+	if (!velocityTex->create()) {
+		delete velocityTex;
+		destroyAnimatingItem(result);
+		return result;
+	}
+	result.particleVelocityTexture = velocityTex;
+
+	auto *stateSampler = _rhi->newSampler(
+		QRhiSampler::Nearest,
+		QRhiSampler::Nearest,
+		QRhiSampler::None,
+		QRhiSampler::ClampToEdge,
+		QRhiSampler::ClampToEdge);
+	if (!stateSampler->create()) {
+		delete stateSampler;
+		destroyAnimatingItem(result);
+		return result;
+	}
+	result.particleStateSampler = stateSampler;
 
 	auto *initUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		sizeof(ComputeInitUniforms));
-	initUbo->create();
+	if (!initUbo->create()) {
+		delete initUbo;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.computeInitUniformBuffer = initUbo;
 
 	auto *updateUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		sizeof(ComputeUpdateUniforms));
-	updateUbo->create();
+	if (!updateUbo->create()) {
+		delete updateUbo;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.computeUpdateUniformBuffer = updateUbo;
 
 	result.computeInitSrb = _rhi->newShaderResourceBindings();
 	result.computeInitSrb->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
+		QRhiShaderResourceBinding::imageLoadStore(
 			0,
 			QRhiShaderResourceBinding::ComputeStage,
-			particleBuf),
+			stateTex,
+			0),
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
 			initUbo),
+		QRhiShaderResourceBinding::imageLoadStore(
+			2,
+			QRhiShaderResourceBinding::ComputeStage,
+			velocityTex,
+			0),
 	});
 	if (!result.computeInitSrb->create()) {
 		destroyAnimatingItem(result);
@@ -607,14 +662,20 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 
 	result.computeUpdateSrb = _rhi->newShaderResourceBindings();
 	result.computeUpdateSrb->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
+		QRhiShaderResourceBinding::imageLoadStore(
 			0,
 			QRhiShaderResourceBinding::ComputeStage,
-			particleBuf),
+			stateTex,
+			0),
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
 			updateUbo),
+		QRhiShaderResourceBinding::imageLoadStore(
+			2,
+			QRhiShaderResourceBinding::ComputeStage,
+			velocityTex,
+			0),
 	});
 	if (!result.computeUpdateSrb->create()) {
 		destroyAnimatingItem(result);
@@ -625,7 +686,11 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		sizeof(RenderUniforms));
-	renderUbo->create();
+	if (!renderUbo->create()) {
+		delete renderUbo;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.renderUniformBuffer = renderUbo;
 
 	result.renderSrb = _rhi->newShaderResourceBindings();
@@ -639,6 +704,11 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			QRhiShaderResourceBinding::FragmentStage,
 			tex,
 			sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::VertexStage,
+			stateTex,
+			stateSampler),
 	});
 	if (!result.renderSrb->create()) {
 		destroyAnimatingItem(result);
@@ -649,23 +719,35 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 }
 
 void ThanosEffectRenderer::destroyAnimatingItem(AnimatingItem &item) {
-	delete item.renderSrb;
-	delete item.computeUpdateSrb;
-	delete item.computeInitSrb;
-	delete item.renderUniformBuffer;
-	delete item.computeUpdateUniformBuffer;
-	delete item.computeInitUniformBuffer;
-	delete item.particleBuffer;
-	delete item.sampler;
-	delete item.texture;
+	const auto deferDelete = [](auto *&resource) {
+		if (resource) {
+			resource->deleteLater();
+			resource = nullptr;
+		}
+	};
+	deferDelete(item.renderSrb);
+	deferDelete(item.computeUpdateSrb);
+	deferDelete(item.computeInitSrb);
+	deferDelete(item.renderUniformBuffer);
+	deferDelete(item.computeUpdateUniformBuffer);
+	deferDelete(item.computeInitUniformBuffer);
+	deferDelete(item.particleStateSampler);
+	deferDelete(item.particleVelocityTexture);
+	deferDelete(item.particleStateTexture);
+	deferDelete(item.sampler);
+	deferDelete(item.texture);
 	item = {};
 }
 
 void ThanosEffectRenderer::releaseResources() {
+	if (!_rhi) {
+		return;
+	}
 	for (auto &item : _items) {
 		destroyAnimatingItem(item);
 	}
 	_items.clear();
+	_pendingItems.clear();
 
 	delete _renderPipeline;
 	_renderPipeline = nullptr;
@@ -680,12 +762,14 @@ void ThanosEffectRenderer::releaseResources() {
 	delete _computeInitSrbLayout;
 	_computeInitSrbLayout = nullptr;
 
+	delete _placeholderStateSampler;
+	_placeholderStateSampler = nullptr;
+	delete _placeholderStateTexture;
+	_placeholderStateTexture = nullptr;
 	delete _placeholderSampler;
 	_placeholderSampler = nullptr;
 	delete _placeholderTexture;
 	_placeholderTexture = nullptr;
-	delete _placeholderParticleBuffer;
-	_placeholderParticleBuffer = nullptr;
 
 	delete _renderUniformBuffer;
 	_renderUniformBuffer = nullptr;
@@ -697,6 +781,8 @@ void ThanosEffectRenderer::releaseResources() {
 	_quadVertexBuffer = nullptr;
 
 	_initialized = false;
+	_seedCounter = 0;
+	_rhi = nullptr;
 }
 
 } // namespace Ui

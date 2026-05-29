@@ -104,7 +104,7 @@ QByteArray ForkSettings::serialize() const {
 			<< qint32(_useOriginalTrayIcon ? 1 : 0)
 			<< qint32(_autoSubmitPasscode ? 1 : 0)
 			<< qint32(_emojiPopupOnClick ? 1 : 0)
-			<< qint32(_mentionByNameDisabled ? 1 : 0)
+			<< qint32(0) // Vacant slot (was _mentionByNameDisabled).
 			<< qint32(_primaryUnmutedMessages ? 1 : 0)
 			<< qint32(_addToMenuRememberMedia ? 1 : 0)
 			<< qint32(_hideAllChatsTab ? 1 : 0)
@@ -148,7 +148,7 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	qint32 useOriginalTrayIcon = _useOriginalTrayIcon;
 	qint32 autoSubmitPasscode = _autoSubmitPasscode;
 	qint32 emojiPopupOnClick = _emojiPopupOnClick;
-	qint32 mentionByNameDisabled = _mentionByNameDisabled;
+	qint32 mentionByNameDisabled = 0; // Vacant slot.
 	qint32 primaryUnmutedMessages = _primaryUnmutedMessages;
 	qint32 addToMenuRememberMedia = _addToMenuRememberMedia;
 	qint32 hideAllChatsTab = _hideAllChatsTab;
@@ -257,7 +257,7 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 	_useOriginalTrayIcon = (useOriginalTrayIcon == 1);
 	_autoSubmitPasscode = (autoSubmitPasscode == 1);
 	_emojiPopupOnClick = (emojiPopupOnClick == 1);
-	_mentionByNameDisabled = (mentionByNameDisabled == 1);
+	(void)mentionByNameDisabled; // Vacant slot.
 	setPrimaryUnmutedMessages(primaryUnmutedMessages == 1);
 	_addToMenuRememberMedia = (addToMenuRememberMedia == 1);
 	_hideAllChatsTab = (hideAllChatsTab == 1);
@@ -287,7 +287,6 @@ void ForkSettings::resetOnLastLogout() {
 	_useOriginalTrayIcon = false;
 	_autoSubmitPasscode = false;
 	_emojiPopupOnClick = false;
-	_mentionByNameDisabled = false;
 	setPrimaryUnmutedMessages(false);
 	_addToMenuRememberMedia = false;
 	_hideAllChatsTab = false;

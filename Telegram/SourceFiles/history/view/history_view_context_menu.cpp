@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/widgets/pill_tabs.h"
 #include "menu/menu_item_download_files.h"
+#include "menu/menu_item_save_to_markdown.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
 #include "menu/menu_timecode_action.h"
@@ -1059,6 +1060,21 @@ void AddDownloadFilesAction(
 		list);
 }
 
+void AddSaveToMarkdownFileAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	if (!request.overSelection
+		|| request.selectedItems.empty()
+		|| list->hasCopyRestrictionForSelected()) {
+		return;
+	}
+	Menu::AddSaveToMarkdownFileAction(
+		menu,
+		request.navigation->parentController(),
+		request.selectedItems);
+}
+
 void AddReportAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
@@ -1167,6 +1183,7 @@ void AddMessageActions(
 	AddDeleteAction(menu, request, list);
 	AddRemoveFromChatAction(menu, request, list);
 	AddDownloadFilesAction(menu, request, list);
+	AddSaveToMarkdownFileAction(menu, request, list);
 	AddReportAction(menu, request, list);
 	AddSelectionAction(menu, request, list);
 	AddRescheduleAction(menu, request, list);

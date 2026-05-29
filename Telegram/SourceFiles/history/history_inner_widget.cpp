@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/reactions/history_view_reactions_button.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
 #include "history/view/history_view_about_view.h"
+#include "history/view/history_view_drag.h"
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
@@ -92,6 +93,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "mainwidget.h"
 #include "menu/menu_item_download_files.h"
+#include "menu/menu_item_save_to_markdown.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
 #include "menu/menu_timecode_action.h"
@@ -2225,6 +2227,7 @@ std::unique_ptr<QMimeData> HistoryInner::prepareDrag() {
 			}
 		}
 
+		auto photoData = HistoryView::PhotoDragData();
 		if (pressedHandler) {
 			const auto lnkDocument = reinterpret_cast<DocumentData*>(
 				pressedHandler->property(
@@ -2235,19 +2238,40 @@ std::unique_ptr<QMimeData> HistoryInner::prepareDrag() {
 					urls.push_back(QUrl::fromLocalFile(filepath));
 				}
 			}
+			const auto lnkPhoto = reinterpret_cast<PhotoData*>(
+				pressedHandler->property(
+					kPhotoLinkMediaProperty).toULongLong());
+			if (lnkPhoto) {
+				const auto itemDate = _mouseActionItem
+					? _mouseActionItem->date()
+					: TimeId(0);
+				photoData = HistoryView::PreparePhotoDragData(
+					lnkPhoto,
+					itemDate);
+				if (!photoData.tempPath.isEmpty()) {
+					urls.push_back(
+						QUrl::fromLocalFile(photoData.tempPath));
+				}
+			}
 		}
 
-		if (forwardIds.empty() && urls.isEmpty()) {
+		if (forwardIds.empty()
+			&& urls.isEmpty()
+			&& photoData.image.isNull()) {
 			return nullptr;
 		}
 
-		auto result = std::make_unique<QMimeData>();
+		auto result = std::make_unique<HistoryView::DragMimeData>(
+			std::move(photoData.tempPath));
 		if (!forwardIds.empty()) {
 			session().data().setMimeForwardIds(std::move(forwardIds));
 			result->setData(u"application/x-td-forward"_q, "1");
 		}
 		if (!urls.isEmpty()) {
 			result->setUrls(urls);
+		}
+		if (!photoData.image.isNull()) {
+			result->setImageData(std::move(photoData.image));
 		}
 		return result;
 	}
@@ -3244,6 +3268,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
 				Menu::AddDownloadFilesAction(_menu, controller, _selected, this);
+				Menu::AddSaveToMarkdownFileAction(
+					_menu,
+					controller,
+					_selected);
 			}
 			_menu->addAction(tr::lng_context_clear_selection(tr::now), [=] {
 				_widget->clearSelected();
@@ -3552,6 +3580,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
 				Menu::AddDownloadFilesAction(_menu, controller, _selected, this);
+				Menu::AddSaveToMarkdownFileAction(
+					_menu,
+					controller,
+					_selected);
 			}
 			_menu->addAction(tr::lng_context_clear_selection(tr::now), [=] {
 				_widget->clearSelected();

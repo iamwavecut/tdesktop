@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 
+#include "base/options.h"
 #include "base/qthelp_url.h"
 #include "base/weak_ptr.h"
 #include "boxes/abstract_box.h"
@@ -51,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "menu/menu_item_save_to_markdown.h"
 #include "settings/settings_common.h"
 #include "storage/localstorage.h"
 #include "styles/style_boxes.h"
@@ -608,13 +610,71 @@ void LinkRewriteRulesBox::prepare() {
 
 //////
 
+class MarkdownClipboardTextBox : public Ui::BoxContent {
+public:
+	MarkdownClipboardTextBox(QWidget*) {
+	}
+
+	void setInnerFocus() override {
+		Expects(_setInnerFocus != nullptr);
+
+		_setInnerFocus();
+	}
+
+protected:
+	void prepare() override;
+
+private:
+	Fn<void()> _setInnerFocus;
+
+};
+
+void MarkdownClipboardTextBox::prepare() {
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+
+	content->add(
+		object_ptr<Ui::FlatLabel>(
+			content,
+			tr::lng_settings_markdown_clipboard_text_label(),
+			st::boxDividerLabel),
+		st::defaultBoxDividerLabelPadding);
+
+	auto &option = base::options::lookup<QString>(
+		Menu::kOptionMarkdownClipboardText);
+
+	const auto field = content->add(
+		object_ptr<Ui::InputField>(
+			content,
+			st::defaultInputField,
+			Ui::InputField::Mode::MultiLine,
+			tr::lng_settings_markdown_clipboard_text_placeholder(),
+			option.value()),
+		st::markdownLinkFieldPadding);
+
+	const auto submit = [=, &option] {
+		option.set(field->getLastText());
+		closeBox();
+	};
+
+	setTitle(tr::lng_settings_markdown_clipboard_text_box_title());
+
+	addButton(tr::lng_box_ok(), submit);
+	addButton(tr::lng_cancel(), [=] { closeBox(); });
+
+	content->moveToLeft(0, 0);
+	setDimensionsToContent(st::boxWidth, content);
+
+	_setInnerFocus = [=] {
+		field->setFocusFast();
+	};
+}
+
+//////
+
 using namespace Builder;
 
 void BuildForkSectionContent(SectionBuilder &builder) {
 	const auto controller = builder.controller();
-	if (!controller) {
-		return;
-	}
 	struct State {
 		rpl::variable<bool> checked;
 	};
@@ -639,6 +699,9 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 			.toggled = rpl::single(checkedCallback()),
 			.keywords = std::move(keywords),
 		});
+		if (!checkbox) {
+			return;
+		}
 		checkbox->toggledValue(
 		) | rpl::filter([=](bool checked) {
 			return (checked != checkedCallback());
@@ -682,6 +745,9 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 			) | rpl::then(state->checked.changes()),
 			.keywords = std::move(keywords),
 		});
+		if (!checkbox) {
+			return;
+		}
 		checkbox->toggledValue(
 		) | rpl::filter([=](bool checked) {
 			return (checked != checkedCallback());
@@ -802,16 +868,6 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 
 	//
 	add(
-		u"fork/mention_by_name"_q,
-		{ u"mention"_q, u"by"_q, u"name"_q },
-		tr::lng_settings_mention_by_name(),
-		[] { return Core::App().settings().fork().mentionByNameDisabled(); },
-		[=](bool checked) {
-			Core::App().settings().fork().setMentionByNameDisabled(checked);
-		});
-
-	//
-	add(
 		u"fork/all_recent_stickers"_q,
 		{ u"all"_q, u"recent"_q, u"stickers"_q },
 		tr::lng_settings_show_all_recent_stickers(),
@@ -884,6 +940,23 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	});
 
 	//
+	builder.addButton({
+		.id = u"fork/markdown_clipboard_text"_q,
+		.title = tr::lng_settings_markdown_clipboard_text(),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconExport },
+		.onClick = [=] {
+			controller->show(Box<MarkdownClipboardTextBox>());
+		},
+		.keywords = {
+			u"markdown"_q,
+			u"clipboard"_q,
+			u"save"_q,
+			u"text"_q,
+		},
+	});
+
+	//
 	add(
 		u"fork/auto_submit_passcode"_q,
 		{ u"auto"_q, u"submit"_q, u"passcode"_q },
@@ -918,7 +991,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/remember_media_menu"_q,
 		{ u"remember"_q, u"media"_q, u"menu"_q },
-		rpl::single(u"Add 'Remember' to menu for media"_q),
+		tr::lng_settings_remember_media_menu(),
 		[] { return Core::App().settings().fork().addToMenuRememberMedia(); },
 		[](bool checked) {
 			Core::App().settings().fork().setAddToMenuRememberMedia(checked);
@@ -928,7 +1001,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	addRestart(
 		u"fork/hide_all_chats_tab"_q,
 		{ u"hide"_q, u"all_chats"_q, u"tab"_q },
-		rpl::single(u"Hide 'All Chats' tab"_q),
+		tr::lng_settings_hide_all_chats_tab(),
 		[] { return Core::App().settings().fork().hideAllChatsTab(); },
 		[](bool checked) {
 			Core::App().settings().fork().setHideAllChatsTab(checked);
@@ -938,7 +1011,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/disable_global_search"_q,
 		{ u"disable"_q, u"global"_q, u"search"_q },
-		rpl::single(u"Disable global search"_q),
+		tr::lng_settings_disable_global_search(),
 		[] { return Core::App().settings().fork().globalSearchDisabled(); },
 		[](bool checked) {
 			Core::App().settings().fork().setGlobalSearchDisabled(checked);
@@ -948,7 +1021,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/forward_and_remove"_q,
 		{ u"forward"_q, u"button"_q, u"remove"_q },
-		rpl::single(u"Button to forward and remove"_q),
+		tr::lng_settings_forward_and_remove(),
 		[] { return Core::App().settings().fork().thirdButtonTopBar(); },
 		[](bool checked) {
 			Core::App().settings().fork().setThirdButtonTopBar(checked);
@@ -958,7 +1031,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/auto_copy_incoming_login_codes"_q,
 		{ u"auto_copy"_q, u"login"_q, u"code"_q },
-		rpl::single(u"Auto-copy incoming login codes"_q),
+		tr::lng_settings_auto_copy_login_codes(),
 		[] { return Core::App().settings().fork().copyLoginCode(); },
 		[](bool checked) {
 			Core::App().settings().fork().setCopyLoginCode(checked);
@@ -968,7 +1041,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/hide_archived_stories"_q,
 		{ u"hide"_q, u"archived"_q, u"stories"_q },
-		rpl::single(u"Hide archived stories"_q),
+		tr::lng_settings_hide_archived_stories(),
 		[] { return Core::App().settings().fork().archivedStoriesAreHidden(); },
 		[](bool checked) {
 			Core::App().settings().fork().setArchivedStoriesAreHidden(checked);
@@ -1097,7 +1170,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/skip_share_from_bot"_q,
 		{ u"skip"_q, u"share"_q, u"bot"_q },
-		rpl::single(u"Skip share box from app bots"_q),
+		tr::lng_settings_skip_share_from_bot(),
 		[] { return Core::App().settings().fork().skipShareFromBot(); },
 		[](bool checked) {
 			Core::App().settings().fork().setSkipShareFromBot(checked);
@@ -1105,7 +1178,7 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	add(
 		u"fork/additional_buttons_web_bot"_q,
 		{ u"additional"_q, u"button"_q, u"web_bot"_q },
-		rpl::single(u"Display additional buttons for app bots"_q),
+		tr::lng_settings_additional_buttons_web_bot(),
 		[] { return Core::App().settings().fork().additionalButtonsWebBot(); },
 		[](bool checked) {
 			Core::App().settings().fork().setAdditionalButtonsWebBot(checked);
@@ -1129,6 +1202,17 @@ private:
 
 };
 
+const auto kMeta = BuildHelper({
+	.id = Fork::Id(),
+	.parentId = MainId(),
+	.title = &tr::lng_settings_section_fork,
+	.icon = &st::menuIconForkSettings,
+}, [](SectionBuilder &builder) {
+	BuildForkSectionContent(builder);
+});
+
+const SectionBuildMethod kForkSection = kMeta.build;
+
 Fork::Fork(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
@@ -1149,35 +1233,9 @@ void Fork::sectionSaveChanges(FnMut<void()> done) {
 void Fork::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
-	const SectionBuildMethod buildMethod = [](
-			not_null<Ui::VerticalLayout*> container,
-			not_null<Window::SessionController*> controller,
-			Fn<void(Type)> showOther,
-			rpl::producer<> showFinished) {
-		const auto isPaused = Window::PausedIn(
-			controller,
-			Window::GifPauseReason::Layer);
-		auto builder = SectionBuilder(WidgetContext{
-			.container = container,
-			.controller = controller,
-			.showOther = std::move(showOther),
-			.isPaused = isPaused,
-		});
-		BuildForkSectionContent(builder);
-	};
-
-	build(content, buildMethod);
+	build(content, kForkSection);
 	Ui::ResizeFitChild(this, content);
 }
-
-const auto kMeta = BuildHelper({
-	.id = Fork::Id(),
-	.parentId = MainId(),
-	.title = &tr::lng_settings_section_fork,
-	.icon = &st::menuIconForkSettings,
-}, [](SectionBuilder &builder) {
-	BuildForkSectionContent(builder);
-});
 
 } // namespace
 
@@ -1187,7 +1245,7 @@ Type ForkId() {
 
 namespace Builder {
 
-SectionBuildMethod ForkSection = kMeta.build;
+SectionBuildMethod ForkSection = kForkSection;
 
 } // namespace Builder
 } // namespace Settings

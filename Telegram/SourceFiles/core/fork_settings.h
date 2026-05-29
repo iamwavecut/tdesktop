@@ -113,12 +113,6 @@ public:
 	void setEmojiPopupOnClick(bool newValue) {
 		_emojiPopupOnClick = newValue;
 	}
-	[[nodiscard]] bool mentionByNameDisabled() const {
-		return _mentionByNameDisabled;
-	}
-	void setMentionByNameDisabled(bool newValue) {
-		_mentionByNameDisabled = newValue;
-	}
 	[[nodiscard]] bool primaryUnmutedMessages() const;
 	void setPrimaryUnmutedMessages(bool newValue);
 	[[nodiscard]] bool addToMenuRememberMedia() const;
@@ -186,7 +180,6 @@ private:
 	bool _useOriginalTrayIcon = false;
 	bool _autoSubmitPasscode = false;
 	bool _emojiPopupOnClick = false;
-	bool _mentionByNameDisabled = false;
 	bool _primaryUnmutedMessages = false;
 	bool _addToMenuRememberMedia = false;
 	bool _hideAllChatsTab = false;

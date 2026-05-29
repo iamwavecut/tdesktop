@@ -7,8 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "history/history_widget_extract_media_fork.h"
+
 #include "base/random.h"
 
+#include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
 #include "api/api_chat_participants.h"
@@ -387,6 +390,33 @@ HistoryWidget::HistoryWidget(
 	}, lifetime());
 
 	_fieldBarCancel->addClickHandler([=] { cancelFieldAreaState(); });
+	_forkExtractMedia = std::make_unique<Fork::ExtractMediaBar>(this, Fork::ExtractMediaBar::Hooks{
+		.preview = [=] { return _preview.get(); },
+		.peer = [=] { return _peer; },
+		.history = [=] { return _history; },
+		.canSendMessages = [=] { return _canSendMessages; },
+		.previewShown = [=] { return !!_previewDrawPreview; },
+		.controller = [=] { return this->controller().get(); },
+		.prepareSendAction = [=](Api::SendOptions o) {
+			return prepareSendAction(o);
+		},
+		.checkSendPayment = [=](
+				int count,
+				Api::SendOptions o,
+				Fn<void(int)> done) {
+			return checkSendPayment(count, o, std::move(done));
+		},
+		.showSlowmodeError = [=] { return showSlowmodeError(); },
+		.currentTextWithTags = [=] {
+			return _field->getTextWithAppliedMarkdown();
+		},
+		.clearFieldText = [=] { clearFieldText(); },
+		.saveDraftWithTextNow = [=] { saveDraftWithTextNow(); },
+		.hideSelectorControlsAnimated = [=] {
+			hideSelectorControlsAnimated();
+		},
+		.setInnerFocus = [=] { setInnerFocus(); },
+	});
 	_send->addClickHandler([=] { sendButtonClicked(); });
 
 	_mediaEditManager.updateRequests() | rpl::on_next([this] {
@@ -2341,6 +2371,13 @@ void HistoryWidget::setupShortcuts() {
 					std::make_shared<Scheduled>(_history));
 				return true;
 			});
+		_canSendTexts
+			&& _field->isVisible()
+			&& request->check(Command::ComposeAiApplyInPlace, 1)
+			&& request->handle([=] {
+				triggerAiApplyInPlace();
+				return true;
+			});
 		if (showRecordButton()
 			&& _canSendMessages
 			&& _joinChannel->isHidden()
@@ -2802,6 +2839,9 @@ void HistoryWidget::showHistory(
 	_photoEditMedia = nullptr;
 	updateReplaceMediaButton();
 	_fieldBarCancel->hide();
+	if (_forkExtractMedia) {
+		_forkExtractMedia->reset();
+	}
 
 	_mediaEditManager.cancel();
 	_membersDropdownShowTimer.cancel();
@@ -3144,6 +3184,9 @@ void HistoryWidget::setupPreview() {
 
 	_preview->parsedValue(
 	) | rpl::on_next([=](WebpageParsed value) {
+		if (_forkExtractMedia && _forkExtractMedia->blocksPreviewUpdates()) {
+			return;
+		}
 		_previewTitle.setText(
 			st::msgNameStyle,
 			value.title,
@@ -3157,6 +3200,9 @@ void HistoryWidget::setupPreview() {
 		if (changed) {
 			updateControlsGeometry();
 			updateControlsVisibility();
+		}
+		if (_forkExtractMedia) {
+			_forkExtractMedia->updateVisibility(!_fieldBarCancel->isHidden());
 		}
 		updateField();
 	}, _preview->lifetime());
@@ -3817,6 +3863,9 @@ void HistoryWidget::updateControlsVisibility() {
 		} else {
 			_fieldBarCancel->hide();
 		}
+		if (_forkExtractMedia) {
+			_forkExtractMedia->updateVisibility(!_fieldBarCancel->isHidden());
+		}
 	} else {
 		if (_autocomplete) {
 			_autocomplete->hide();
@@ -3861,6 +3910,9 @@ void HistoryWidget::updateControlsVisibility() {
 			}
 		} else {
 			_fieldBarCancel->hide();
+		}
+		if (_forkExtractMedia) {
+			_forkExtractMedia->updateVisibility(!_fieldBarCancel->isHidden());
 		}
 		_tabbedSelectorToggle->hide();
 		_botKeyboardShow->hide();
@@ -4844,6 +4896,22 @@ void HistoryWidget::showAiComposeBox() {
 	});
 }
 
+void HistoryWidget::triggerAiApplyInPlace() {
+	Api::TriggerAiApplyInPlace(
+		&session(),
+		controller()->uiShow(),
+		this,
+		_field,
+		prepareTextForEditMsg(),
+		crl::guard(this, [=](TextWithTags textWithTags, int cursor) {
+			setFieldText(
+				textWithTags,
+				TextUpdateEvent::SaveDraft,
+				Ui::InputField::HistoryAction::NewEntry);
+			_field->setCursorPosition(cursor);
+		}));
+}
+
 void HistoryWidget::saveEditMessage(Api::SendOptions options) {
 	Expects(_history != nullptr);
 
@@ -5092,6 +5160,8 @@ void HistoryWidget::send(Api::SendOptions options) {
 		return;
 	} else if (_voiceRecordBar->isListenState()) {
 		_voiceRecordBar->requestToSendWithOptions(options);
+		return;
+	} else if (_forkExtractMedia && _forkExtractMedia->trySend(options)) {
 		return;
 	}
 
@@ -6627,6 +6697,13 @@ void HistoryWidget::moveFieldControls() {
 	_fieldBarCancel->moveToRight(
 		0,
 		_field->y() - st::historySendPadding - _fieldBarCancel->height());
+	if (_forkExtractMedia) {
+		const auto button = _forkExtractMedia->button();
+		button->moveToRight(
+			_fieldBarCancel->width(),
+			_field->y() - st::historySendPadding - button->height());
+		_forkExtractMedia->updateVisibility(!_fieldBarCancel->isHidden());
+	}
 	if (_inlineResults) {
 		_inlineResults->moveBottom(_field->y() - st::historySendPadding);
 	}
@@ -8765,7 +8842,7 @@ void HistoryWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 		this,
 		close ? st::historyReplyCancel : st::historyPinnedShowAll);
 	button->setAccessibleName(close
-		? tr::lng_cancel(tr::now)
+		? tr::lng_pinned_unpin(tr::now)
 		: tr::lng_settings_events_pinned(tr::now));
 	button->clicks(
 	) | rpl::on_next([=] {
@@ -9639,6 +9716,9 @@ void HistoryWidget::cancelEdit() {
 void HistoryWidget::cancelFieldAreaState() {
 	controller()->hideLayer();
 	if (_previewDrawPreview) {
+		if (_forkExtractMedia) {
+			_forkExtractMedia->reset();
+		}
 		_preview->apply({ .removed = true });
 	} else if (_editMsgId) {
 		cancelEdit();
@@ -10203,9 +10283,14 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 			previewLeft += st::historyReplyPreview + st::msgReplyBarSkip;
 		}
 		p.setPen(st::historyReplyNameFg);
+		const auto extractMediaWidth = (_forkExtractMedia
+			&& !_forkExtractMedia->button()->isHidden())
+			? _forkExtractMedia->button()->width()
+			: 0;
 		const auto elidedWidth = width()
 			- previewLeft
 			- _fieldBarCancel->width()
+			- extractMediaWidth
 			- st::msgReplyPadding.right();
 
 		_previewTitle.drawElided(

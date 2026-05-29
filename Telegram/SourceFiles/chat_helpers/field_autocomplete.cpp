@@ -1739,9 +1739,8 @@ void InitFieldAutocomplete(
 	raw->mentionChosen(
 	) | rpl::on_next([=](FieldAutocomplete::MentionChosen data) {
 		const auto useUsername =
-			Core::App().settings().fork().mentionByNameDisabled()
-				|| ((data.method == FieldAutocomplete::ChooseMethod::ByClick)
-					&& base::IsCtrlPressed());
+			(data.method == FieldAutocomplete::ChooseMethod::ByClick)
+				&& base::IsCtrlPressed();
 		const auto user = data.user;
 		const auto ctrlClick = base::IsCtrlPressed()
 			&& data.method == FieldAutocomplete::ChooseMethod::ByClick;

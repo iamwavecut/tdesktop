@@ -1113,6 +1113,13 @@ historyPinnedShowAll: IconButton(historyReplyCancel) {
 	icon: icon {{ "pinned_show_all", historyReplyCancelFg }};
 	iconOver: icon {{ "pinned_show_all", historyReplyCancelFgOver }};
 }
+historyForkExtractMediaIcon: icon {{ "chat/input_replace", historyReplyCancelFg }};
+historyForkExtractMediaIconOver: icon {{ "chat/input_replace", historyReplyCancelFgOver }};
+historyForkExtractMediaActiveIcon: icon {{ "chat/input_replace", windowActiveTextFg }};
+historyForkExtractMedia: IconButton(historyReplyCancel) {
+	icon: historyForkExtractMediaIcon;
+	iconOver: historyForkExtractMediaIconOver;
+}
 sendFilesReplyIconPosition: point(11px, 7px);
 sendFilesReplyCancelSize: 24px;
 sendFilesReplyCancel: IconButton(editMediaButton) {

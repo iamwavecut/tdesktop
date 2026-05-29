@@ -245,6 +245,10 @@ Data::WebPageDraft WebpageProcessor::draft() const {
 	return _draft;
 }
 
+WebPageData *WebpageProcessor::data() const {
+	return _data;
+}
+
 std::shared_ptr<WebpageResolver> WebpageProcessor::resolver() const {
 	return _resolver;
 }

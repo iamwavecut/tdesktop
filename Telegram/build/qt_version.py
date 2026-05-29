@@ -9,5 +9,5 @@ def resolve(arch):
             os.environ['QT'] = '6.10.0'
         else:
             print('Choosing Qt 5.')
-            os.environ['QT'] = '5.15.18'
+            os.environ['QT'] = '5.15.19'
     return True
