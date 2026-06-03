@@ -1035,6 +1035,10 @@ topBarInfo: IconButton(topBarSearch) {
 	icon: icon {{ "top_bar_profile", menuIconFg }};
 	iconOver: icon {{ "top_bar_profile", menuIconFgOver }};
 }
+topBarClearDeleted: IconButton(topBarSearch) {
+	icon: icon {{ "menu/clear", menuIconFg }};
+	iconOver: icon {{ "menu/clear", menuIconFgOver }};
+}
 topBarInfoActive: icon {{ "top_bar_profile", windowActiveTextFg }};
 topBarActionSkip: 10px;
 topBarActionButtonLargeRadius: 8px;

@@ -729,6 +729,13 @@ HistoryWidget::HistoryWidget(
 	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
 		item->mainView()->itemDataChanged();
 	}, lifetime());
+	session().data().itemDataChanges(
+	) | rpl::filter([=](not_null<HistoryItem*> item) {
+		const auto history = item->history();
+		return history == _history || history == _migrated;
+	}) | rpl::on_next([=](not_null<HistoryItem*>) {
+		refreshClearDeletedMessagesState();
+	}, lifetime());
 
 	Core::App().settings().largeEmojiChanges(
 	) | rpl::on_next([=] {
@@ -1083,6 +1090,10 @@ HistoryWidget::HistoryWidget(
 	_topBar->clearFromChatSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmClearSelected();
+	}, _topBar->lifetime());
+	_topBar->clearDeletedMessagesRequest(
+	) | rpl::on_next([=] {
+		confirmClearDeletedMessages();
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {
@@ -2846,6 +2857,7 @@ void HistoryWidget::showHistory(
 	_mediaEditManager.cancel();
 	_membersDropdownShowTimer.cancel();
 	_scroll->takeWidget<HistoryInner>().destroy();
+	refreshClearDeletedMessagesState();
 
 	clearInlineBot();
 
@@ -2961,6 +2973,7 @@ void HistoryWidget::showHistory(
 		_scroll->hide();
 		_list = _scroll->setOwnedWidget(
 			object_ptr<HistoryInner>(this, _scroll, controller(), _history));
+		refreshClearDeletedMessagesState();
 		_list->sendIntroSticker(
 		) | rpl::on_next([=](not_null<DocumentData*> sticker) {
 			sendExistingDocument(
@@ -7390,6 +7403,7 @@ void HistoryWidget::itemRemoved(not_null<const HistoryItem*> item) {
 	if (j != _itemRevealPending.end()) {
 		_itemRevealPending.erase(j);
 	}
+	refreshClearDeletedMessagesState();
 }
 
 void HistoryWidget::itemEdited(not_null<HistoryItem*> item) {
@@ -7707,6 +7721,7 @@ void HistoryWidget::updateHistoryGeometry(
 			}
 		}
 	}
+	refreshClearDeletedMessagesState();
 }
 
 void HistoryWidget::revealItemsCallback() {
@@ -9924,6 +9939,61 @@ void HistoryWidget::confirmClearSelected() {
 			clearSelected();
 		}),
 		.confirmText = tr::lng_selected_clear_from_chat_confirm(tr::now),
+		.cancelText = tr::lng_cancel(tr::now),
+		.confirmStyle = &st::attentionBoxButton,
+	}));
+}
+
+void HistoryWidget::refreshClearDeletedMessagesState() {
+	const auto count = _list
+		? int(_list->locallyClearableDeletedIds().size())
+		: 0;
+	if (_clearDeletedMessagesCount == count) {
+		return;
+	}
+	_clearDeletedMessagesCount = count;
+	_topBar->setClearDeletedMessagesCount(count);
+}
+
+void HistoryWidget::confirmClearDeletedMessages() {
+	if (!_list) {
+		return;
+	}
+	const auto ids = _list->locallyClearableDeletedIds();
+	if (ids.empty()) {
+		refreshClearDeletedMessagesState();
+		return;
+	}
+	const auto count = int(ids.size());
+	controller()->show(Ui::MakeConfirmBox({
+		.text = tr::lng_clear_deleted_messages_sure(
+			tr::now,
+			lt_count,
+			count),
+		.confirmed = crl::guard(this, [=](Fn<void()> close) {
+			close();
+			auto items = std::vector<not_null<HistoryItem*>>();
+			items.reserve(ids.size());
+			for (const auto &id : ids) {
+				if (const auto item = session().data().message(id)) {
+					if (item->isDeleted() && item->canRemoveLocally()) {
+						items.push_back(item);
+					}
+				}
+			}
+			if (items.empty()) {
+				refreshClearDeletedMessagesState();
+				return;
+			}
+			session().data().notifyItemsAboutToBeDestroyed(items);
+			for (const auto item : items) {
+				if (item->canRemoveLocally()) {
+					item->hideLocally();
+				}
+			}
+			refreshClearDeletedMessagesState();
+		}),
+		.confirmText = tr::lng_clear_deleted_messages_confirm(tr::now),
 		.cancelText = tr::lng_cancel(tr::now),
 		.confirmStyle = &st::attentionBoxButton,
 	}));

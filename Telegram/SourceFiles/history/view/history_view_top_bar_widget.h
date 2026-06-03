@@ -79,6 +79,7 @@ public:
 		ActiveChat activeChat,
 		SendActionPainter *sendAction);
 	void setCustomTitle(const QString &title);
+	void setClearDeletedMessagesCount(int count);
 
 	void showChooseMessagesForReport(Data::ReportInput reportInput);
 	void clearChooseMessagesForReport();
@@ -114,6 +115,9 @@ public:
 	}
 	[[nodiscard]] rpl::producer<> clearSelectionRequest() const {
 		return _clearSelection.events();
+	}
+	[[nodiscard]] rpl::producer<> clearDeletedMessagesRequest() const {
+		return _clearDeletedMessagesRequests.events();
 	}
 	[[nodiscard]] rpl::producer<> cancelChooseForReportRequest() const {
 		return _cancelChooseForReport.events();
@@ -217,6 +221,7 @@ private:
 	bool _canClearFromChat = false;
 	bool _canForward = false;
 	bool _canSendNow = false;
+	int _clearDeletedMessagesCount = 0;
 	bool _searchMode = false;
 
 	Ui::Animations::Simple _selectedShown;
@@ -247,6 +252,7 @@ private:
 	object_ptr<Ui::IconButton> _search;
 	object_ptr<Ui::IconButton> _infoToggle;
 	object_ptr<Ui::IconButton> _menuToggle;
+	object_ptr<Ui::IconButton> _clearDeletedMessages;
 	base::unique_qptr<Ui::PopupMenu> _menu;
 
 	object_ptr<RpWidget> _membersShowArea = { nullptr };
@@ -273,6 +279,7 @@ private:
 	rpl::event_stream<> _deleteSelection;
 	rpl::event_stream<> _clearFromChatSelection;
 	rpl::event_stream<> _clearSelection;
+	rpl::event_stream<> _clearDeletedMessagesRequests;
 	rpl::event_stream<> _cancelChooseForReport;
 
 	rpl::lifetime _backLifetime;

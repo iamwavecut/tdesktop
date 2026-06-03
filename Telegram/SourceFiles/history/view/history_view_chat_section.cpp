@@ -330,6 +330,10 @@ ChatWidget::ChatWidget(
 	) | rpl::on_next([=] {
 		confirmClearSelected();
 	}, _topBar->lifetime());
+	_topBar->clearDeletedMessagesRequest(
+	) | rpl::on_next([=] {
+		confirmClearDeletedMessages();
+	}, _topBar->lifetime());
 	_topBar->forwardSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmForwardSelected();
@@ -355,6 +359,7 @@ ChatWidget::ChatWidget(
 		this,
 		&controller->session(),
 		static_cast<ListDelegate*>(this)));
+	refreshClearDeletedMessagesState();
 	_scroll->move(0, _topBar->height());
 	_scroll->show();
 	_scroll->scrolls(
@@ -3321,6 +3326,7 @@ MessagesBarData ChatWidget::listMessagesBar(
 }
 
 void ChatWidget::listContentRefreshed() {
+	refreshClearDeletedMessagesState();
 }
 
 void ChatWidget::listUpdateDateLink(
@@ -3602,6 +3608,61 @@ void ChatWidget::confirmDeleteSelected() {
 
 void ChatWidget::confirmClearSelected() {
 	ConfirmClearSelectedItems(_inner);
+}
+
+void ChatWidget::refreshClearDeletedMessagesState() {
+	const auto count = _inner
+		? int(_inner->locallyClearableDeletedIds().size())
+		: 0;
+	if (_clearDeletedMessagesCount == count) {
+		return;
+	}
+	_clearDeletedMessagesCount = count;
+	_topBar->setClearDeletedMessagesCount(count);
+}
+
+void ChatWidget::confirmClearDeletedMessages() {
+	if (!_inner) {
+		return;
+	}
+	const auto ids = _inner->locallyClearableDeletedIds();
+	if (ids.empty()) {
+		refreshClearDeletedMessagesState();
+		return;
+	}
+	const auto count = int(ids.size());
+	controller()->show(Ui::MakeConfirmBox({
+		.text = tr::lng_clear_deleted_messages_sure(
+			tr::now,
+			lt_count,
+			count),
+		.confirmed = crl::guard(this, [=](Fn<void()> close) {
+			close();
+			auto items = std::vector<not_null<HistoryItem*>>();
+			items.reserve(ids.size());
+			for (const auto &id : ids) {
+				if (const auto item = session().data().message(id)) {
+					if (item->isDeleted() && item->canRemoveLocally()) {
+						items.push_back(item);
+					}
+				}
+			}
+			if (items.empty()) {
+				refreshClearDeletedMessagesState();
+				return;
+			}
+			session().data().notifyItemsAboutToBeDestroyed(items);
+			for (const auto item : items) {
+				if (item->canRemoveLocally()) {
+					item->hideLocally();
+				}
+			}
+			refreshClearDeletedMessagesState();
+		}),
+		.confirmText = tr::lng_clear_deleted_messages_confirm(tr::now),
+		.cancelText = tr::lng_cancel(tr::now),
+		.confirmStyle = &st::attentionBoxButton,
+	}));
 }
 
 void ChatWidget::confirmForwardSelected() {

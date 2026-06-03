@@ -5063,6 +5063,25 @@ MessageIdsList HistoryInner::getSelectedItemsForLocalClear() const {
 	return result;
 }
 
+MessageIdsList HistoryInner::locallyClearableDeletedIds() const {
+	auto result = MessageIdsList();
+	const auto gather = [&](not_null<History*> history) {
+		for (const auto &block : history->blocks) {
+			for (const auto &message : block->messages) {
+				const auto item = message->data();
+				if (item->isDeleted() && item->canRemoveLocally()) {
+					result.push_back(item->fullId());
+				}
+			}
+		}
+	};
+	if (_migrated) {
+		gather(_migrated);
+	}
+	gather(_history);
+	return result;
+}
+
 void HistoryInner::onTouchSelect() {
 	_touchSelect = true;
 	_touchMaybeSelecting = true;

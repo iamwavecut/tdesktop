@@ -2928,6 +2928,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_selected_clear_from_chat_sure#one" = "Clear {count} selected message from this chat on this device?";
 "lng_selected_clear_from_chat_sure#other" = "Clear {count} selected messages from this chat on this device?";
 "lng_selected_clear_from_chat_confirm" = "Clear";
+"lng_clear_deleted_messages" = "Clear deleted messages";
+"lng_clear_deleted_messages_sure#one" = "Clear {count} deleted message from this chat on this device?";
+"lng_clear_deleted_messages_sure#other" = "Clear {count} deleted messages from this chat on this device?";
+"lng_clear_deleted_messages_confirm" = "Clear";
 "lng_sent_date" = "Sent: {date}";
 "lng_approximate_about" = "Estimated date of video publishing.";
 "lng_views_tooltip#one" = "Views: {count}";

@@ -171,6 +171,7 @@ public:
 	void clearSelected(bool onlyTextSelection = false);
 	[[nodiscard]] MessageIdsList getSelectedItems() const;
 	[[nodiscard]] MessageIdsList getSelectedItemsForLocalClear() const;
+	[[nodiscard]] MessageIdsList locallyClearableDeletedIds() const;
 	[[nodiscard]] bool hasSelectedItems() const;
 	[[nodiscard]] HistoryView::SelectionModeResult inSelectionMode() const;
 	[[nodiscard]] bool elementIntersectsRange(

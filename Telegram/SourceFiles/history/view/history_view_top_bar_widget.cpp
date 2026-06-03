@@ -130,6 +130,7 @@ TopBarWidget::TopBarWidget(
 , _search(this, st::topBarSearch)
 , _infoToggle(this, st::topBarInfo)
 , _menuToggle(this, st::topBarMenuToggle)
+, _clearDeletedMessages(this, st::topBarClearDeleted)
 , _titlePeerText(st::windowMinWidth / 3)
 , _onlineUpdater([=] { updateOnlineDisplay(); }) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
@@ -172,6 +173,9 @@ TopBarWidget::TopBarWidget(
 		}
 	});
 	_groupCall->setClickedCallback([=] { groupCall(); });
+	_clearDeletedMessages->setClickedCallback([=] {
+		_clearDeletedMessagesRequests.fire({});
+	});
 	_menuToggle->addClickHandler([=](auto) { showPeerMenu(); });
 	_menuToggle->setAcceptBoth(true, true);
 	_infoToggle->setClickedCallback([=] { toggleInfoSection(); });
@@ -271,6 +275,8 @@ TopBarWidget::TopBarWidget(
 	_call->setAccessibleName(tr::lng_profile_action_short_call(tr::now));
 	_groupCall->setAccessibleName(tr::lng_group_call_title(tr::now));
 	_search->setAccessibleName(tr::lng_shortcuts_search(tr::now));
+	_clearDeletedMessages->setAccessibleName(
+		tr::lng_clear_deleted_messages(tr::now));
 	_infoToggle->setAccessibleName(tr::lng_settings_section_info(tr::now));
 	_menuToggle->setAccessibleName(tr::lng_chat_menu(tr::now));
 	_back->setAccessibleName(tr::lng_go_back(tr::now));
@@ -989,6 +995,15 @@ void TopBarWidget::setCustomTitle(const QString &title) {
 	}
 }
 
+void TopBarWidget::setClearDeletedMessagesCount(int count) {
+	count = std::max(count, 0);
+	if (_clearDeletedMessagesCount == count) {
+		return;
+	}
+	_clearDeletedMessagesCount = count;
+	updateControlsVisibility();
+}
+
 bool TopBarWidget::rootChatsListBar() const {
 	if (_activeChat.section != Section::ChatsList) {
 		return false;
@@ -1228,6 +1243,10 @@ void TopBarWidget::updateControlsGeometry() {
 	if (!_search->isHidden()) {
 		_rightTaken += _search->width() + st::topBarCallSkip;
 	}
+	_clearDeletedMessages->moveToRight(_rightTaken, otherButtonsTop);
+	if (!_clearDeletedMessages->isHidden()) {
+		_rightTaken += _clearDeletedMessages->width() + st::topBarCallSkip;
+	}
 
 	updateMembersShowArea();
 }
@@ -1377,6 +1396,12 @@ void TopBarWidget::updateControlsVisibility() {
 	_groupCall->setVisible(historyMode
 		&& groupCallsEnabled
 		&& !_chooseForReportReason);
+	const auto canClearDeletedMessages = (_clearDeletedMessagesCount > 0)
+		&& !_chooseForReportReason
+		&& (section == Section::History
+			|| section == Section::Replies
+			|| section == Section::SavedSublist);
+	_clearDeletedMessages->setVisible(canClearDeletedMessages);
 
 	if (_membersShowArea) {
 		_membersShowArea->setVisible(!_chooseForReportReason);

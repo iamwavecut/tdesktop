@@ -546,6 +546,7 @@ ListWidget::ListWidget(
 	) | rpl::on_next([=](not_null<HistoryItem*> item) {
 		if (const auto view = viewForItem(item)) {
 			view->itemDataChanged();
+			_delegate->listContentRefreshed();
 		}
 	}, lifetime());
 
@@ -782,6 +783,7 @@ void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 		_emptyInfo->setVisible(isEmpty());
 	}
 	checkActivation();
+	_delegate->listContentRefreshed();
 }
 
 std::optional<int> ListWidget::scrollTopForPosition(
@@ -2897,6 +2899,18 @@ SelectedItems ListWidget::getSelectedItems() const {
 	return collectSelectedItems();
 }
 
+MessageIdsList ListWidget::locallyClearableDeletedIds() const {
+	auto result = MessageIdsList();
+	result.reserve(_items.size());
+	for (const auto &view : _items) {
+		const auto item = view->data();
+		if (item->isDeleted() && item->canRemoveLocally()) {
+			result.push_back(item->fullId());
+		}
+	}
+	return result;
+}
+
 TextSelection ListWidget::getSelectedTextRange(
 		not_null<HistoryItem*> item) const {
 	return (_selectedTextItem == item) ? _selectedTextRange : TextSelection();
@@ -4894,6 +4908,7 @@ void ListWidget::itemRemoved(not_null<const HistoryItem*> item) {
 		_replyButtonManager->remove(item->fullId());
 	}
 	updateItemsGeometry();
+	_delegate->listContentRefreshed();
 }
 
 QPoint ListWidget::mapPointToItem(

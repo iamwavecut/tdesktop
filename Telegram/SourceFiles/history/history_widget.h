@@ -299,7 +299,9 @@ public:
 	void forwardSelected();
 	void confirmDeleteSelected();
 	void confirmClearSelected();
+	void confirmClearDeletedMessages();
 	void clearSelected();
+	void refreshClearDeletedMessagesState();
 
 	[[nodiscard]] SendMenu::Details sendMenuDetails() const override;
 	bool processChosenSticker(ChatHelpers::FileChosen &&chosen) override;
@@ -930,6 +932,7 @@ private:
 	DragArea::Areas _attachDragAreas;
 
 	bool _nonEmptySelection = false;
+	int _clearDeletedMessagesCount = 0;
 
 	TextUpdateEvents _textUpdateEvents = (TextUpdateEvents() | TextUpdateEvent::SaveDraft | TextUpdateEvent::SendTyping);
 

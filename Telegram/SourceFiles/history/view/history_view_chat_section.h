@@ -295,8 +295,10 @@ private:
 
 	void confirmDeleteSelected();
 	void confirmClearSelected();
+	void confirmClearDeletedMessages();
 	void confirmForwardSelected();
 	void clearSelected();
+	void refreshClearDeletedMessagesState();
 	void setPinnedVisibility(bool shown);
 
 	[[nodiscard]] Api::SendAction prepareSendAction(
@@ -414,6 +416,7 @@ private:
 	std::shared_ptr<Ui::ChatTheme> _theme;
 	QPointer<ListWidget> _inner;
 	object_ptr<TopBarWidget> _topBar;
+	int _clearDeletedMessagesCount = 0;
 	object_ptr<Ui::PlainShadow> _topBarShadow;
 	std::unique_ptr<Ui::RpWidget> _topBars;
 	std::unique_ptr<ComposeControls> _composeControls;
