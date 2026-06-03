@@ -195,13 +195,9 @@ void ThanosEffectRenderer::initialize(
 	_placeholderStateSampler->create();
 
 	if (!createPipelines(rt)) {
-		const auto hadItems = !_items.empty() || !_pendingItems.empty();
 		LOG(("ThanosEffect: Required shaders unavailable or pipeline creation failed, disabling QRhi path."));
+		finishActiveItems();
 		releaseResources();
-		_pendingItems.clear();
-		if (hadItems) {
-			_allDone.fire({});
-		}
 		return;
 	}
 
@@ -337,17 +333,38 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	return _renderPipeline->create();
 }
 
+void ThanosEffectRenderer::clearRenderTarget(
+		QRhiRenderTarget *rt,
+		QRhiCommandBuffer *cb) {
+	const auto bg = QColor(0, 0, 0, 0);
+	cb->beginPass(rt, bg, { 1.0f, 0 }, nullptr);
+	cb->endPass();
+}
+
+void ThanosEffectRenderer::finishActiveItems() {
+	const auto hadItems = !_items.empty() || !_pendingItems.empty();
+	for (auto &item : _items) {
+		destroyAnimatingItem(item);
+	}
+	_items.clear();
+	_pendingItems.clear();
+	if (hadItems) {
+		_allDone.fire({});
+	}
+}
+
 void ThanosEffectRenderer::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
 	if (rhi->isDeviceLost()) {
-		_pendingItems.clear();
+		finishActiveItems();
 		releaseResources();
 		return;
 	}
 	if (!_initialized || !rhi->isFeatureSupported(QRhi::Compute)) {
-		_pendingItems.clear();
+		clearRenderTarget(rt, cb);
+		finishActiveItems();
 		return;
 	}
 	_rhi = rhi;
@@ -360,9 +377,15 @@ void ThanosEffectRenderer::render(
 		crl::time(66)) / 1000.;
 	_lastFrameTime = now;
 
+	const auto hadPendingOrActiveItems = !_items.empty()
+		|| !_pendingItems.empty();
 	addPendingItems(cb);
 
 	if (_items.empty()) {
+		if (hadPendingOrActiveItems) {
+			clearRenderTarget(rt, cb);
+			_allDone.fire({});
+		}
 		return;
 	}
 

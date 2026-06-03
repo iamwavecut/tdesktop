@@ -87,6 +87,8 @@ private:
 	};
 
 	[[nodiscard]] bool createPipelines(QRhiRenderTarget *rt);
+	void clearRenderTarget(QRhiRenderTarget *rt, QRhiCommandBuffer *cb);
+	void finishActiveItems();
 	void addPendingItems(QRhiCommandBuffer *cb);
 	AnimatingItem createAnimatingItem(ThanosItem &&item);
 	void destroyAnimatingItem(AnimatingItem &item);
