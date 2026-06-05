@@ -2306,14 +2306,18 @@ ReplyMarkupFlags HistoryItem::replyKeyboardFlags() const {
 void HistoryItem::addLogEntryOriginal(
 		WebPageId localId,
 		const QString &label,
-		const TextWithEntities &content) {
+		const TextWithEntities &content,
+		PhotoData *photo,
+		DocumentData *document) {
 	Expects(isAdminLogEntry());
 
 	AddComponents(HistoryMessageLogEntryOriginal::Bit());
 	Get<HistoryMessageLogEntryOriginal>()->page = _history->owner().webpage(
 		localId,
 		label,
-		content);
+		content,
+		photo,
+		document);
 }
 
 void HistoryItem::setFactcheck(MessageFactcheck info) {
@@ -2511,10 +2515,10 @@ void HistoryItem::refreshMainView() {
 	}
 }
 
-void HistoryItem::removeMainView() {
+void HistoryItem::removeMainView(Data::ViewRemovalReason reason) {
 	if (const auto view = mainView()) {
 		_history->owner().notifyHistoryChangeDelayed(_history);
-		view->removeFromBlock();
+		view->removeFromBlock(reason);
 	}
 }
 
@@ -4609,6 +4613,12 @@ FullStoryId HistoryItem::replyToStory() const {
 		}
 	}
 	return {};
+}
+
+void HistoryItem::resolveAdminLogReplyTo(not_null<HistoryItem*> replyTo) {
+	if (const auto reply = Get<HistoryMessageReply>()) {
+		reply->setInLogReplyTo(this, replyTo);
+	}
 }
 
 FullReplyTo HistoryItem::replyTo() const {
