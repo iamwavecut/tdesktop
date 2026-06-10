@@ -474,7 +474,8 @@ void FileWriteDescriptor::finish() {
 bool ReadFile(
 		FileReadDescriptor &result,
 		const QString &name,
-		const QString &basePath) {
+		const QString &basePath,
+		bool *tooNew) {
 	const auto base = basePath + name;
 
 	// detect order of read attempts
@@ -539,6 +540,9 @@ bool ReadFile(
 				).arg(version
 				).arg(name
 				).arg(AppVersion));
+			if (tooNew) {
+				*tooNew = true;
+			}
 			continue;
 		}
 
@@ -577,6 +581,9 @@ bool ReadFile(
 			QFile::remove(toTry[1 - i]);
 		}
 
+		if (tooNew) {
+			*tooNew = false;
+		}
 		return true;
 	}
 	return false;

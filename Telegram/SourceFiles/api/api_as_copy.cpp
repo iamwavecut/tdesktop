@@ -101,7 +101,8 @@ FullReplyTo ReplyToIdFromDraft(not_null<PeerData*> peer) {
 				MTPVector<MTPMessageEntity>(),
 				MTP_inputMediaEmpty(),
 				MTP_long(0),
-				SuggestToMTP({})
+				SuggestToMTP({}),
+				MTPInputRichMessage()
 		)).send();
 	}
 	return replyTo;

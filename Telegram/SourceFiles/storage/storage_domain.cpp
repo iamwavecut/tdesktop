@@ -14,6 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "base/random.h"
 
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
+
 namespace Storage {
 namespace {
 
@@ -21,6 +24,48 @@ using namespace details;
 
 [[nodiscard]] QString BaseGlobalPath() {
 	return cWorkingDir() + u"tdata/"_q;
+}
+
+[[nodiscard]] bool MoveTooNewDataToBackup() {
+	const auto from = cWorkingDir() + u"tdata"_q;
+	auto dir = QDir(from);
+	if (!dir.exists()) {
+		return false;
+	}
+	const auto base = cWorkingDir() + u"tdata_backup"_q;
+	auto target = base;
+	for (auto i = 1; QFileInfo::exists(target); ++i) {
+		target = base + '_' + QString::number(i);
+	}
+	if (!QDir().mkpath(target)) {
+		LOG(("App Error: could not create backup dir '%1'.").arg(target));
+		return false;
+	}
+	const auto entries = dir.entryList(QDir::AllEntries
+		| QDir::Hidden
+		| QDir::System
+		| QDir::NoDotAndDotDot);
+	auto movedAny = false;
+	for (const auto &name : entries) {
+		// Keep the crash handler files: on Windows 'working' is held open
+		// for the whole session and 'dumps' is the active minidump dir, so
+		// moving them would fail or break crash reporting.
+		if (name == u"working"_q || name == u"dumps"_q) {
+			continue;
+		}
+		if (QDir().rename(from + '/' + name, target + '/' + name)) {
+			movedAny = true;
+		} else {
+			LOG(("App Error: could not move '%1' to backup.").arg(name));
+		}
+	}
+	if (!movedAny) {
+		QDir(target).removeRecursively();
+		return false;
+	}
+	LOG(("App Info: moved too new data from '%1' to '%2'."
+		).arg(from, target));
+	return true;
 }
 
 [[nodiscard]] QString ComputeKeyName(const QString &dataName) {
@@ -50,6 +95,12 @@ StartResult Domain::start(const QByteArray &passcode) {
 	} else if (modern == StartModernResult::Failed) {
 		startFromScratch();
 		return StartResult::Success;
+	} else if (modern == StartModernResult::TooNew) {
+		if (MoveTooNewDataToBackup()) {
+			startFromScratch();
+			return StartResult::Success;
+		}
+		// If the data could not be moved away - behave as before.
 	}
 	auto legacy = std::make_unique<Main::Account>(_owner, _dataName, 0);
 	const auto result = legacy->legacyStart(passcode);
@@ -119,8 +170,11 @@ Domain::StartModernResult Domain::startModern(
 	const auto name = ComputeKeyName(_dataName);
 
 	FileReadDescriptor keyData;
-	if (!ReadFile(keyData, name, BaseGlobalPath())) {
-		return StartModernResult::Empty;
+	auto tooNew = false;
+	if (!ReadFile(keyData, name, BaseGlobalPath(), &tooNew)) {
+		return tooNew
+			? StartModernResult::TooNew
+			: StartModernResult::Empty;
 	}
 	LOG(("App Info: reading accounts info..."));
 

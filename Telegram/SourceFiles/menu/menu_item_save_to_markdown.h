@@ -35,4 +35,9 @@ void AddSaveToMarkdownFileAction(
 	not_null<Window::SessionController*> controller,
 	const std::vector<HistoryView::SelectedItem> &selectedItems);
 
+void AddSaveToMarkdownFileAction(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<Window::SessionController*> controller,
+	const base::flat_set<not_null<HistoryItem*>, std::less<>> &items);
+
 } // namespace Menu

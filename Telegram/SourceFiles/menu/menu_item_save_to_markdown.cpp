@@ -389,4 +389,22 @@ void AddSaveToMarkdownFileAction(
 		std::move(historyItems));
 }
 
+void AddSaveToMarkdownFileAction(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<Window::SessionController*> controller,
+		const base::flat_set<not_null<HistoryItem*>, std::less<>> &items) {
+	if (items.empty()) {
+		return;
+	}
+	auto historyItems = std::vector<not_null<HistoryItem*>>();
+	historyItems.reserve(items.size());
+	for (const auto &item : items) {
+		historyItems.emplace_back(item);
+	}
+	AddSaveToMarkdownFileActionForItems(
+		menu,
+		controller,
+		std::move(historyItems));
+}
+
 } // namespace Menu

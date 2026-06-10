@@ -53,6 +53,10 @@ namespace Images {
 struct CornersMaskRef;
 } // namespace Images
 
+namespace Iv {
+struct RichPage;
+} // namespace Iv
+
 namespace HistoryView {
 class Element;
 class Document;
@@ -136,9 +140,21 @@ struct HistoryMessageEdited
 
 struct HistoryMessageMediaForInstantView
 : RuntimeComponent<HistoryMessageMediaForInstantView, HistoryItem> {
+	using Item = std::variant<PhotoData*, DocumentData*>;
+
 	QString url;
 	base::flat_set<not_null<DocumentData*>> documents;
 	base::flat_set<not_null<PhotoData*>> photos;
+	std::vector<Item> items;
+	std::vector<TextWithEntities> captions;
+};
+
+struct HistoryMessageRichPageSource
+: RuntimeComponent<HistoryMessageRichPageSource, HistoryItem> {
+	std::shared_ptr<const Iv::RichPage> page;
+	std::shared_ptr<const Iv::RichPage> fullPage;
+	uint64 fullPageVersion = 0;
+	bool canEdit = false;
 };
 
 struct HistoryMessageDeleted

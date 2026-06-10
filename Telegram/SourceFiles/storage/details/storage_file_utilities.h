@@ -87,7 +87,8 @@ private:
 bool ReadFile(
 	FileReadDescriptor &result,
 	const QString &name,
-	const QString &basePath);
+	const QString &basePath,
+	bool *tooNew = nullptr);
 
 bool DecryptLocal(
 	EncryptedDescriptor &result,

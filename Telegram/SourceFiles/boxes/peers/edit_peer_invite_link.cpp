@@ -1620,6 +1620,16 @@ object_ptr<Ui::BoxContent> EditLinkBox(
 	};
 	const auto isGroup = !peer->isBroadcast();
 	const auto isPublic = peer->isChannel() && peer->asChannel()->isPublic();
+	const auto globalRequestApproval = peer->isChannel()
+		&& peer->asChannel()->requestToJoin();
+	const auto guardBot = [&]() -> UserData* {
+		const auto channel = peer->asChannel();
+		return channel ? channel->guardBot() : nullptr;
+	}();
+	const auto guardBotUsername = guardBot ? guardBot->username() : QString();
+	const auto guardBotLink = guardBotUsername.isEmpty()
+		? QString()
+		: peer->session().createInternalLink(guardBotUsername);
 	auto object = Box([=](not_null<Ui::GenericBox*> box) {
 		const auto fill = isGroup
 			? Fn<Ui::InviteLinkSubscriptionToggle()>(nullptr)
@@ -1627,7 +1637,15 @@ object_ptr<Ui::BoxContent> EditLinkBox(
 				return Ui::FillCreateInviteLinkSubscriptionToggle(box, peer);
 			};
 		if (creating) {
-			Ui::CreateInviteLinkBox(box, fill, isGroup, isPublic, done);
+			Ui::CreateInviteLinkBox(
+				box,
+				fill,
+				isGroup,
+				isPublic,
+				globalRequestApproval,
+				guardBotUsername,
+				guardBotLink,
+				done);
 		} else {
 			Ui::EditInviteLinkBox(
 				box,
@@ -1641,6 +1659,9 @@ object_ptr<Ui::BoxContent> EditLinkBox(
 					.requestApproval = data.requestApproval,
 					.isGroup = isGroup,
 					.isPublic = isPublic,
+					.globalRequestApproval = globalRequestApproval,
+					.guardBotUsername = guardBotUsername,
+					.guardBotLink = guardBotLink,
 				},
 				done);
 		}

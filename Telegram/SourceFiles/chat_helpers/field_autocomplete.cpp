@@ -1738,13 +1738,10 @@ void InitFieldAutocomplete(
 
 	raw->mentionChosen(
 	) | rpl::on_next([=](FieldAutocomplete::MentionChosen data) {
-		const auto useUsername =
-			(data.method == FieldAutocomplete::ChooseMethod::ByClick)
-				&& base::IsCtrlPressed();
 		const auto user = data.user;
 		const auto ctrlClick = base::IsCtrlPressed()
 			&& data.method == FieldAutocomplete::ChooseMethod::ByClick;
-		if (data.mention.isEmpty() || ctrlClick || !useUsername) {
+		if (data.mention.isEmpty() || ctrlClick) {
 			field->insertTag(
 				user->firstName.isEmpty() ? user->name() : user->firstName,
 				PrepareMentionTag(user));
