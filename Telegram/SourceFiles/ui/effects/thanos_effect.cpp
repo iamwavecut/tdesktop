@@ -31,7 +31,7 @@ bool ThanosEffect::Supported() {
 	// observably mirrors the underlying window. Refuse to create the
 	// effect at all in that case — the controller falls back to the
 	// regular collapse animation.
-	return RhiComputeSupportedCached()
+	return GL::CheckRhiCapabilities().compute
 		&& ThanosEffectRenderer::Available();
 #else
 	return false;

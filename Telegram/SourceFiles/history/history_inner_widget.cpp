@@ -2211,21 +2211,18 @@ void HistoryInner::mouseActionStart(const QPoint &screenPos, Qt::MouseButton but
 				} else if (!_pressWasInactive) {
 					if (_mouseCursorState == CursorState::Date) {
 						_mouseAction = MouseAction::PrepareDrag; // start sticker drag or by-date drag
-					} else {
-						if (dragState.afterSymbol) ++_mouseTextSymbol;
-						TextSelection selStatus = { _mouseTextSymbol, _mouseTextSymbol };
-						if (selStatus != FullSelection && (_selected.empty() || _selected.cbegin()->second != FullSelection)) {
-							if (!_selected.empty()) {
-								repaintItem(_selected.cbegin()->first);
-								_selected.clear();
-							}
-							_selected.emplace(_mouseActionItem, selStatus);
-							_mouseAction = MouseAction::Selecting;
-							repaintItem(_mouseActionItem);
-						} else if (!hasSelectRestriction()
-							|| _mouseActionItem->canRemoveLocally()) {
-							_mouseAction = MouseAction::PrepareSelect;
-						}
+					} else if (!hasSelectedItems()) {
+						_mouseTextAnchor = dragState;
+						setTextSelection(
+							mouseActionView,
+							mouseActionView->selectionFromStates(
+								_mouseTextAnchor,
+								dragState,
+								_mouseSelectType));
+						_mouseAction = MouseAction::Selecting;
+					} else if (!hasSelectRestriction()
+						|| _mouseActionItem->canRemoveLocally()) {
+						_mouseAction = MouseAction::PrepareSelect;
 					}
 				}
 			} else if (!_pressWasInactive
@@ -2520,37 +2517,17 @@ void HistoryInner::mouseActionFinish(
 		repaintItem(_mouseActionItem);
 	} else if (simpleSelectionChange
 		&& _mouseCursorState == CursorState::Date
-		&& !hasSelectRestriction()
 		&& _dragStateItem
-		&& (button != Qt::RightButton)) {
-		auto i = _selected.find(_dragStateItem);
-		if (i != _selected.cend() && i->second == FullSelection) {
-			_selected.erase(i);
-			repaintItem(_mouseActionItem);
-		} else if ((i == _selected.cend())
-			&& ((_dragStateItem->isRegular()
-					&& !_dragStateItem->isService())
-				|| _dragStateItem->canRemoveLocally())
-			&& inSelectionMode().inSelectionMode) {
-			if (_selected.size() < MaxSelectedItems) {
-				_selected.emplace(_dragStateItem, FullSelection);
-				repaintItem(_mouseActionItem);
-			}
-		} else if (_mouseCursorState == CursorState::Date
-			&& (!hasSelectRestriction()
-				|| _dragStateItem->canRemoveLocally())
-			&& ((_dragStateItem->isRegular()
-					&& !_dragStateItem->isService())
-				|| _dragStateItem->canRemoveLocally())) {
-			changeSelectionAsGroup(
-				&_selected,
-				_dragStateItem,
-				SelectAction::Select);
-			repaintItem(_mouseActionItem);
-		} else {
-			_selected.clear();
-			update();
-		}
+		&& (!hasSelectRestriction() || _dragStateItem->canRemoveLocally())
+		&& ((_dragStateItem->isRegular()
+				&& !_dragStateItem->isService())
+			|| _dragStateItem->canRemoveLocally())) {
+		clearTextSelection();
+		changeSelectionAsGroup(
+			&_selected,
+			_dragStateItem,
+			SelectAction::Select);
+		repaintItem(_mouseActionItem);
 	} else if (_mouseAction == MouseAction::Selecting) {
 		if (_dragSelFrom && _dragSelTo) {
 			applyDragSelection();
@@ -5122,19 +5099,15 @@ auto HistoryInner::getSelectionState() const
 -> HistoryView::TopBarWidget::SelectedState {
 	auto result = HistoryView::TopBarWidget::SelectedState {};
 	for (auto &selected : _selected) {
-		if (selected.second == FullSelection) {
-			++result.count;
-			if (selected.first->canDelete()) {
-				++result.canDeleteCount;
-			}
-			if (selected.first->canRemoveLocally()) {
-				++result.canRemoveLocallyCount;
-			}
-			if (selected.first->allowsForward()) {
-				++result.canForwardCount;
-			}
-		} else if (selected.second.from != selected.second.to) {
-			result.textSelected = true;
+		++result.count;
+		if (selected->canDelete()) {
+			++result.canDeleteCount;
+		}
+		if (selected->canRemoveLocally()) {
+			++result.canRemoveLocallyCount;
+		}
+		if (selected->allowsForward()) {
+			++result.canForwardCount;
 		}
 	}
 	result.textSelected = hasSelectedText()
@@ -5196,11 +5169,10 @@ MessageIdsList HistoryInner::getSelectedItemsForLocalClear() const {
 	auto result = ranges::make_subrange(
 		_selected.begin(),
 		_selected.end()
-	) | views::filter([](const auto &selected) {
-		const auto item = selected.first;
-		return item && item->canRemoveLocally();
-	}) | views::transform([](const auto &selected) {
-		return selected.first->fullId();
+	) | views::filter([](const auto &item) {
+		return item->canRemoveLocally();
+	}) | views::transform([](const auto &item) {
+		return item->fullId();
 	}) | to_vector;
 
 	result |= actions::sort(less{}, [](const FullMsgId &msgId) {
