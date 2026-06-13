@@ -904,6 +904,34 @@ public:
 #ifndef Q_OS_MAC
 		const auto shadowFs = Ui::Rhi::ShaderFromFile(
 			u":/shaders/argb32.frag.qsb"_q);
+		_shadowVertexBuffer = _rhi->newBuffer(
+			QRhiBuffer::Dynamic,
+			QRhiBuffer::VertexBuffer,
+			4 * 4 * sizeof(float));
+		_shadowVertexBuffer->create();
+		_shadowUniformBuffer = _rhi->newBuffer(
+			QRhiBuffer::Dynamic,
+			QRhiBuffer::UniformBuffer,
+			256);
+		_shadowUniformBuffer->create();
+
+		validateShadowImage();
+
+		_shadowSrb = _rhi->newShaderResourceBindings();
+		_shadowSrb->setBindings({
+			QRhiShaderResourceBinding::uniformBuffer(
+				0,
+				QRhiShaderResourceBinding::VertexStage,
+				_shadowUniformBuffer),
+			QRhiShaderResourceBinding::sampledTexture(
+				1,
+				QRhiShaderResourceBinding::FragmentStage,
+				_shadowTexture, _sampler),
+		});
+		if (!_shadowSrb->create()) {
+			return false;
+		}
+
 		QRhiGraphicsPipeline::TargetBlend blend;
 		blend.enable = true;
 		blend.srcColor = QRhiGraphicsPipeline::One;
@@ -919,7 +947,7 @@ public:
 		_shadowBlendPipeline->setTargetBlends({ blend });
 		_shadowBlendPipeline->setTopology(
 			QRhiGraphicsPipeline::TriangleStrip);
-		_shadowBlendPipeline->setShaderResourceBindings(_argb32Srb);
+		_shadowBlendPipeline->setShaderResourceBindings(_shadowSrb);
 		_shadowBlendPipeline->setRenderPassDescriptor(rpDesc);
 		_shadowBlendPipeline = createPipeline(_shadowBlendPipeline);
 		if (!_shadowBlendPipeline) {
@@ -930,9 +958,8 @@ public:
 		return true;
 	}
 
-	void paintTitleShadow(
-			QRhiRenderTarget *rt,
-			QRhiCommandBuffer *cb,
+	void prepareTitleShadow(
+			QRhiResourceUpdateBatch *rub,
 			float pw,
 			float ph) {
 		if (!_shadowBlendPipeline) {
@@ -982,21 +1009,10 @@ public:
 			_shadowUniformBuffer, 0, sizeof(viewport2), viewport2);
 	}
 
-		_argb32Srb->setBindings({
-			QRhiShaderResourceBinding::uniformBuffer(
-				0,
-				QRhiShaderResourceBinding::VertexStage,
-				_uniformBuffer),
-			QRhiShaderResourceBinding::sampledTexture(
-				1,
-				QRhiShaderResourceBinding::FragmentStage,
-				_shadowTexture, _sampler),
-		});
-		if (!_argb32Srb->create()) {
+	void paintTitleShadow(QRhiCommandBuffer *cb, float pw, float ph) {
+		if (!_shadowBlendPipeline) {
 			return;
 		}
-
-		cb->resourceUpdate(rub2);
 		cb->setGraphicsPipeline(_shadowBlendPipeline);
 		cb->setShaderResources(_shadowSrb);
 		cb->setViewport({ 0, 0, pw, ph });
