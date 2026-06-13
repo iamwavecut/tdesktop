@@ -4968,6 +4968,7 @@ bool HistoryItem::isEmpty() const {
 	return isLocallyHidden()
 		|| (_text.empty()
 		&& !_media
+		&& !Has<HistoryMessageRichPageSource>()
 		&& (!Has<HistoryMessageFactcheck>()
 			|| Get<HistoryMessageFactcheck>()->data.text.empty())
 		&& !Has<HistoryMessageLogEntryOriginal>());

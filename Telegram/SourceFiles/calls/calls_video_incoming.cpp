@@ -790,6 +790,10 @@ public:
 		rub->updateDynamicBuffer(
 			_vertexBuffer, 0, sizeof(coords), coords);
 
+#ifndef Q_OS_MAC
+		prepareTitleShadow(rub, pw, ph);
+#endif
+
 		cb->beginPass(rt, Qt::black, { 1.0f, 0 }, rub);
 		cb->setGraphicsPipeline(pipeline);
 		cb->setShaderResources(srb);
@@ -799,7 +803,7 @@ public:
 		cb->draw(4);
 
 #ifndef Q_OS_MAC
-		paintTitleShadow(rt, cb, pw, ph);
+		paintTitleShadow(cb, pw, ph);
 #endif
 
 		cb->endPass();
@@ -934,10 +938,7 @@ public:
 		if (!_shadowBlendPipeline) {
 			return;
 		}
-		validateShadowImage();
-		if (!_shadowTexture) {
-			return;
-		}
+		ensureShadowUploaded(rub);
 		const auto factor = style::DevicePixelRatio();
 		const auto widget = _owner->widget();
 		const auto left = (_owner->_topControlsAlignment
@@ -968,19 +969,18 @@ public:
 		const auto tt = texRect.top() / atlasH;
 		const auto tb = texRect.bottom() / atlasH;
 
-		auto *rub2 = _rhi->nextResourceUpdateBatch();
-		ensureShadowUploaded(rub2);
 		const float shadowCoords[] = {
 			shadowRect.left(), shadowRect.bottom(), tl, tt,
 			shadowRect.right(), shadowRect.bottom(), tr, tt,
 			shadowRect.left(), shadowRect.top(), tl, tb,
 			shadowRect.right(), shadowRect.top(), tr, tb,
 		};
-		rub2->updateDynamicBuffer(
-			_vertexBuffer, 0, sizeof(shadowCoords), shadowCoords);
+		rub->updateDynamicBuffer(
+			_shadowVertexBuffer, 0, sizeof(shadowCoords), shadowCoords);
 		const float viewport2[] = { pw, ph, 0.f, 0.f };
-		rub2->updateDynamicBuffer(
-			_uniformBuffer, 0, sizeof(viewport2), viewport2);
+		rub->updateDynamicBuffer(
+			_shadowUniformBuffer, 0, sizeof(viewport2), viewport2);
+	}
 
 		_argb32Srb->setBindings({
 			QRhiShaderResourceBinding::uniformBuffer(
@@ -998,9 +998,9 @@ public:
 
 		cb->resourceUpdate(rub2);
 		cb->setGraphicsPipeline(_shadowBlendPipeline);
-		cb->setShaderResources(_argb32Srb);
+		cb->setShaderResources(_shadowSrb);
 		cb->setViewport({ 0, 0, pw, ph });
-		const QRhiCommandBuffer::VertexInput vbuf2(_vertexBuffer, 0);
+		const QRhiCommandBuffer::VertexInput vbuf2(_shadowVertexBuffer, 0);
 		cb->setVertexInput(0, 1, &vbuf2);
 		cb->draw(4);
 	}
@@ -1058,7 +1058,10 @@ public:
 		delete _shadowBlendPipeline; _shadowBlendPipeline = nullptr;
 		delete _argb32Srb; _argb32Srb = nullptr;
 		delete _yuv420Srb; _yuv420Srb = nullptr;
+		delete _shadowSrb; _shadowSrb = nullptr;
 		delete _shadowTexture; _shadowTexture = nullptr;
+		delete _shadowVertexBuffer; _shadowVertexBuffer = nullptr;
+		delete _shadowUniformBuffer; _shadowUniformBuffer = nullptr;
 		delete _rgbaTexture; _rgbaTexture = nullptr;
 		delete _yTexture; _yTexture = nullptr;
 		delete _uTexture; _uTexture = nullptr;
@@ -1092,7 +1095,10 @@ private:
 	QRhiGraphicsPipeline *_shadowBlendPipeline = nullptr;
 	QRhiShaderResourceBindings *_argb32Srb = nullptr;
 	QRhiShaderResourceBindings *_yuv420Srb = nullptr;
+	QRhiShaderResourceBindings *_shadowSrb = nullptr;
 	QRhiTexture *_shadowTexture = nullptr;
+	QRhiBuffer *_shadowVertexBuffer = nullptr;
+	QRhiBuffer *_shadowUniformBuffer = nullptr;
 	QSize _shadowSize;
 	QRect _shadowLeftRect;
 	QRect _shadowRightRect;
