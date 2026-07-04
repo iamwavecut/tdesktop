@@ -887,6 +887,7 @@ private:
 	Ui::Animations::Simple _scrollToAnimation;
 
 	HistoryView::CornerButtons _cornerButtons;
+	std::unique_ptr<HistoryView::PullToNextChannel> _pullToNext;
 	PeerId _unreadSummaryPeerId = 0;
 	MsgId _unreadSummaryTopicRootId = 0;
 	PeerId _unreadSummaryMonoforumPeerId = 0;
