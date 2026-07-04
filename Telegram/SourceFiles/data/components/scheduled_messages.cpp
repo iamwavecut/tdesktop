@@ -338,10 +338,7 @@ void ScheduledMessages::checkEntitiesAndUpdate(const MTPDmessage &data) {
 	const auto existing = j->second;
 	if (!HasScheduledDate(existing)) {
 		// Destroy a local message, that should be in history.
-		existing->updateSentContent({
-			qs(data.vmessage()),
-			Api::EntitiesFromMTP(_session, data.ventities().value_or_empty())
-		}, data.vmedia());
+		existing->updateSentContent(data);
 		existing->updateReplyMarkup(
 			HistoryMessageMarkupData(data.vreply_markup()));
 		existing->updateForwardedInfo(data.vfwd_from());
@@ -561,12 +558,7 @@ HistoryItem *ScheduledMessages::append(
 				existing->recordEditionSnapshot(message);
 				existing->applyEdition(HistoryMessageEdition(_session, data));
 			} else {
-				existing->updateSentContent({
-					qs(data.vmessage()),
-					Api::EntitiesFromMTP(
-						_session,
-						data.ventities().value_or_empty())
-				}, data.vmedia());
+				existing->updateSentContent(data);
 				existing->updateReplyMarkup(
 					HistoryMessageMarkupData(data.vreply_markup()));
 				existing->updateForwardedInfo(data.vfwd_from());

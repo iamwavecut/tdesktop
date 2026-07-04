@@ -42,7 +42,7 @@ jobs:
     if: ${{ github.event_name != 'release' || !endsWith(github.event.release.tag_name, '-dev') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: recursive

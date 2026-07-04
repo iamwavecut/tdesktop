@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/delayed_activation.h"
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/effects/message_sending_animation_controller.h"
 #include "ui/effects/reaction_fly_animation.h"
@@ -270,6 +271,13 @@ public:
 			Fn<void()> hiddenCallback) override {
 		if (_widget) {
 			_widget->elementShowTooltip(text, hiddenCallback);
+		}
+	}
+	void elementShowHiddenSenderTooltip(
+			FullMsgId itemId,
+			const TextWithEntities &text) override {
+		if (_widget) {
+			_widget->elementShowHiddenSenderTooltip(itemId, text);
 		}
 	}
 	bool elementAnimationsPaused() override {
@@ -649,7 +657,6 @@ void HistoryInner::setupSwipeReplyAndBack() {
 	if (!_peer) {
 		return;
 	}
-	const auto peer = _peer;
 
 	auto update = [=, history = _history](
 			Ui::Controls::SwipeContextData data) {
@@ -735,8 +742,7 @@ void HistoryInner::setupSwipeReplyAndBack() {
 				return Ui::Controls::SwipeHandlerFinishData();
 			}
 		}
-		if (inSelectionMode().inSelectionMode
-			|| (peer->isChannel() && !peer->isMegagroup())) {
+		if (inSelectionMode().inSelectionMode) {
 			return result;
 		}
 		enumerateItems<EnumItemsDirection::BottomToTop>([&](
@@ -1301,9 +1307,16 @@ void HistoryInner::setTextSelection(
 
 TextSelection HistoryInner::getSelectedTextRange(
 		not_null<HistoryItem*> item) const {
-	return hasSelectedText() && (_selectedTextItem == item)
-		? _selectedTextSelection.flatRangeForEdit()
-		: TextSelection();
+	if (!hasSelectedText()) {
+		return TextSelection();
+	} else if (_selectedTextItem == item) {
+		return _selectedTextSelection.flatRangeForEdit();
+	} else if (const auto view = viewByItem(_selectedTextItem)) {
+		if (view->textItem() == item) {
+			return _selectedTextSelection.flatRangeForEdit();
+		}
+	}
+	return TextSelection();
 }
 
 auto HistoryInner::getSelectedTextSelection(
@@ -2098,9 +2111,7 @@ void HistoryInner::touchScrollUpdated(const QPoint &screenPos) {
 
 QPoint HistoryInner::mapPointToItem(QPoint p, const Element *view) const {
 	if (view) {
-		const auto top = itemTop(view);
-		p.setY(p.y() - top);
-		return p;
+		return p - QPoint(SelectionViewOffset(this, view), itemTop(view));
 	}
 	return QPoint();
 }
@@ -2117,7 +2128,6 @@ QPoint HistoryInner::mapPointToItem(
 not_null<HistoryItem*> HistoryInner::lookupItemByPoint(
 		QPoint point,
 		not_null<Element*> view) const {
-	point -= QPoint(SelectionViewOffset(this, view), 0);
 	return HistoryView::LookupItemByPoint(view, mapPointToItem(point, view));
 }
 
@@ -2492,16 +2502,36 @@ void HistoryInner::mouseActionFinish(
 	}
 	if (needItemSelectionToggle) {
 		clearTextSelection();
-		if (_dragStateItem && _selected.contains(_dragStateItem)) {
-			_selected.remove(_dragStateItem);
-			repaintItem(_mouseActionItem);
-		} else if (_dragStateItem
-			&& !_dragStateItem->isService()
-			&& _dragStateItem->isRegular()) {
-			if (_selected.size() < MaxSelectedItems) {
-				_selected.emplace(_dragStateItem);
+		const auto pointState = Element::Moused()
+			? Element::Moused()->pointState(
+				mapPointToItem(
+					mapFromGlobal(_mousePosition),
+					Element::Moused()))
+			: HistoryView::PointState::Outside;
+		if (pointState == HistoryView::PointState::GroupPart) {
+			const auto exactItem = _dragStateItem
+				? _dragStateItem
+				: _mouseActionItem;
+			if (exactItem
+				&& !exactItem->isService()
+				&& exactItem->isRegular()) {
+				changeSelection(
+					&_selected,
+					exactItem,
+					SelectAction::Invert);
 				repaintItem(_mouseActionItem);
+			} else {
+				_selected.clear();
+				update();
 			}
+		} else if (_mouseActionItem
+			&& !_mouseActionItem->isService()
+			&& _mouseActionItem->isRegular()) {
+			changeSelectionAsGroup(
+				&_selected,
+				_mouseActionItem,
+				SelectAction::Invert);
+			repaintItem(_mouseActionItem);
 		} else {
 			_selected.clear();
 			update();
@@ -2907,6 +2937,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					const auto selection = getSelectedTextRange(item);
 					if (!selection.empty()) {
 						clearSelected(true);
+					}
+					if (item->richPage()) {
+						Ui::PreventDelayedActivation();
 					}
 					_widget->editMessage(item, selection);
 				}
@@ -3509,7 +3542,21 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						hasCopyRestrictionForSelected()));
 				}, &st::menuIconTranslate);
 			}
-			addItemActions(item, item);
+			const auto editItem = [&]() -> HistoryItem* {
+				const auto view = item->groupId()
+					? viewByItem(item)
+					: nullptr;
+				if (!view) {
+					return item;
+				} else if (const auto part = view->selectedQuote(
+						_selectedTextSelection).item) {
+					return part;
+				} else if (const auto textItem = view->textItem()) {
+					return textItem;
+				}
+				return item;
+			}();
+			addItemActions(item, editItem);
 			addSearchAction();
 		} else {
 			addReplyAction(partItemOrLeader);
@@ -3520,17 +3567,18 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				const auto mediaHasTextForCopy = media && media->hasTextForCopy();
 				if (const auto document = media ? media->getDocument() : nullptr) {
 					if (!view->isIsolatedEmoji() && document->sticker()) {
+						const auto sending = item->isSending();
 						if (document->sticker()->set) {
 							_menu->addAction(document->isStickerSetInstalled() ? tr::lng_context_pack_info(tr::now) : tr::lng_context_pack_add(tr::now), [=] {
 								showStickerPackInfo(document);
 							}, &st::menuIconStickers);
-						} else {
+						} else if (!sending) {
 							Api::AddAddToOwnedSetAction(
 								Ui::Menu::CreateAddActionCallback(_menu),
 								_controller->uiShow(),
 								document);
 						}
-						{
+						if (!sending) {
 							const auto isFaved = session->data().stickers().isFaved(document);
 							_menu->addAction(isFaved ? tr::lng_faved_stickers_remove(tr::now) : tr::lng_faved_stickers_add(tr::now), [=] {
 								Api::ToggleFavedSticker(controller->uiShow(), document, itemId);
@@ -4046,7 +4094,7 @@ void HistoryInner::resizeEvent(QResizeEvent *e) {
 	mouseActionUpdate();
 }
 
-TextForMimeData HistoryInner::getSelectedText(bool depersonalized) const {
+TextForMimeData HistoryInner::getSelectedText() const {
 	auto selected = _selected;
 
 	if (_mouseAction == MouseAction::Selecting && _dragSelFrom && _dragSelTo) {
@@ -4060,74 +4108,25 @@ TextForMimeData HistoryInner::getSelectedText(bool depersonalized) const {
 		return _selectedText;
 	}
 
+	const auto richContext = (selected.size() > 1);
 	struct Part {
-		QString name;
-		QString time;
-		TextForMimeData unwrapped;
+		not_null<HistoryItem*> item;
+		const Data::Group *group = nullptr;
 	};
 
 	auto groups = base::flat_set<not_null<const Data::Group*>>();
-	auto fullSize = 0;
 	auto texts = base::flat_map<Data::MessagePosition, Part>();
-	auto personMap = base::flat_map<not_null<PeerData*>, int>();
-	auto hiddenPersonMap = base::flat_map<QString, int>();
-	auto personCounter = 1;
-
-	const auto personNumber = [&](not_null<HistoryItem*> item) {
-		if (const auto sender = item->originalSender()) {
-			const auto it = personMap.find(sender);
-			if (it != personMap.end()) {
-				return it->second;
-			}
-			const auto number = personCounter++;
-			personMap.emplace(sender, number);
-			return number;
-		} else if (const auto hidden = item->originalHiddenSenderInfo()) {
-			const auto it = hiddenPersonMap.find(hidden->name);
-			if (it != hiddenPersonMap.end()) {
-				return it->second;
-			}
-			const auto number = personCounter++;
-			hiddenPersonMap.emplace(hidden->name, number);
-			return number;
-		}
-		const auto author = item->author();
-		const auto it = personMap.find(author);
-		if (it != personMap.end()) {
-			return it->second;
-		}
-		const auto number = personCounter++;
-		personMap.emplace(author, number);
-		return number;
-	};
-
-	const auto wrapItem = [&](
-			not_null<HistoryItem*> item,
-			TextForMimeData &&unwrapped) {
-		auto name = QString();
-		if (depersonalized) {
-			name = QString("Person %1").arg(personNumber(item));
-		} else {
-			name = item->author()->name();
-		}
-		const auto i = texts.emplace(item->position(), Part{
-			.name = name,
-			.time = QString("[%1] ").arg(
-				QLocale().toString(ItemDateTime(item), QLocale::ShortFormat)),
-			.unwrapped = std::move(unwrapped),
-		}).first;
-		fullSize += i->second.time.size()
-			+ i->second.name.size()
-			+ 2
-			+ i->second.unwrapped.expanded.size();
-	};
 	const auto addItem = [&](not_null<HistoryItem*> item) {
-		wrapItem(item, HistoryItemText(item));
+		texts.emplace(item->position(), Part{ .item = item });
 	};
 	const auto addGroup = [&](not_null<const Data::Group*> group) {
 		Expects(!group->items.empty());
 
-		wrapItem(group->items.back(), HistoryGroupText(group));
+		const auto item = group->items.back();
+		texts.emplace(item->position(), Part{
+			.item = item,
+			.group = group.get(),
+		});
 	};
 
 	for (const auto &item : selected) {
@@ -4145,15 +4144,33 @@ TextForMimeData HistoryInner::getSelectedText(bool depersonalized) const {
 			addItem(item);
 		}
 	}
-	if (texts.size() == 1) {
-		return texts.front().second.unwrapped;
+	if (!richContext && texts.size() == 1) {
+		const auto &part = texts.front().second;
+		if (part.group) {
+			return HistoryGroupText(not_null<const Data::Group*>{ part.group });
+		}
+		return HistoryItemText(part.item);
 	}
 	auto result = TextForMimeData();
 	const auto sep = u"\n"_q;
-	result.reserve(fullSize + (texts.size() - 1) * sep.size());
 	for (auto i = texts.begin(), e = texts.end(); i != e;) {
-		result.append(i->second.time).append(i->second.name).append(u": "_q);
-		result.append(std::move(i->second.unwrapped));
+		const auto &part = i->second;
+		auto body = TextForMimeData();
+		if (part.group) {
+			const auto group = not_null<const Data::Group*>{ part.group };
+			body = richContext
+				? HistoryGroupTextForSelectedCopy(group)
+				: HistoryGroupText(group);
+		} else {
+			body = richContext
+				? HistoryItemTextForSelectedCopy(part.item)
+				: HistoryItemText(part.item);
+		}
+		auto wrapped = HistorySelectedItemWrappedText(
+			part.item,
+			std::move(body),
+			richContext);
+		result.append(std::move(wrapped));
 		if (++i != e) {
 			result.append(sep);
 		}
@@ -4314,6 +4331,23 @@ void HistoryInner::keyPressEvent(QKeyEvent *e) {
 		if (selectedState.count > 0
 			&& selectedState.canDeleteCount == selectedState.count) {
 			_widget->confirmDeleteSelected();
+		}
+	} else if (HistoryView::KeyboardTextSelection::IsExtendKey(e->key())
+		&& (e->modifiers() & Qt::ShiftModifier)
+		&& hasSelectedText()) {
+		const auto view = viewByItem(_selectedTextItem);
+		const auto next = view
+			? _keyboardTextSelection.extend(
+				view,
+				_selectedTextSelection,
+				e->key(),
+				e->modifiers())
+			: std::optional<MessageSelection>();
+		if (next) {
+			setTextSelection(view, *next);
+			e->accept();
+		} else {
+			e->ignore();
 		}
 	} else if (!(e->modifiers() & ~Qt::ShiftModifier)
 		&& e->key() != Qt::Key_Shift) {
@@ -4645,6 +4679,14 @@ void HistoryInner::changeItemsRevealHeight(int revealHeight) {
 	updateSize();
 }
 
+void HistoryInner::setPullBottomInset(int inset) {
+	if (_pullBottomInset == inset) {
+		return;
+	}
+	_pullBottomInset = inset;
+	updateSize();
+}
+
 void HistoryInner::updateSize() {
 	const auto visibleHeight = _scroll->height();
 	auto collapseGapTotal = 0;
@@ -4689,7 +4731,8 @@ void HistoryInner::updateSize() {
 
 	const auto newHeight = _historyMarginTop
 		+ itemsHeight
-		+ _historyMarginBottom;
+		+ _historyMarginBottom
+		+ _pullBottomInset;
 	if (width() != _scroll->width() || height() != newHeight) {
 		resize(_scroll->width(), newHeight);
 
@@ -5032,6 +5075,26 @@ void HistoryInner::elementShowTooltip(
 	_widget->showInfoTooltip(text, std::move(hiddenCallback));
 }
 
+void HistoryInner::elementShowHiddenSenderTooltip(
+		FullMsgId itemId,
+		const TextWithEntities &text) {
+	auto area = QRect();
+	if (const auto item = _controller->session().data().message(itemId)) {
+		if (const auto view = viewByItem(item)) {
+			const auto tooltip
+				= view->Get<HistoryView::HiddenSenderTooltip>();
+			const auto top = itemTop(view);
+			if (tooltip && !tooltip->linkRect.isEmpty() && top >= 0) {
+				const auto local = tooltip->linkRect;
+				area = QRect(
+					mapToGlobal(QPoint(local.x(), top + local.y())),
+					local.size());
+			}
+		}
+	}
+	_widget->showHiddenSenderTooltip(area, text);
+}
+
 bool HistoryInner::elementAnimationsPaused() {
 	return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 }
@@ -5294,10 +5357,6 @@ void HistoryInner::mouseActionUpdate() {
 		? _curHistory->blocks[_curBlock]->messages[_curItem].get()
 		: nullptr;
 	const auto item = view ? view->data().get() : nullptr;
-	const auto selectionViewOffset = view
-		? QPoint(SelectionViewOffset(this, view), 0)
-		: QPoint(0, 0);
-	point -= selectionViewOffset;
 	if (view) {
 		const auto changed = (Element::Moused() != view);
 		if (changed) {
@@ -5355,7 +5414,7 @@ void HistoryInner::mouseActionUpdate() {
 		dragState = replyBtnState;
 		lnkhost = _replyButtonManager.get();
 	} else if (item) {
-		if (item != _mouseActionItem || ((m + selectionViewOffset) - _dragStartPosition).manhattanLength() >= QApplication::startDragDistance()) {
+		if (item != _mouseActionItem || (m - _dragStartPosition).manhattanLength() >= QApplication::startDragDistance()) {
 			if (_mouseAction == MouseAction::PrepareDrag) {
 				_mouseAction = MouseAction::Dragging;
 				InvokeQueued(this, [=] { performDrag(); });
@@ -6309,6 +6368,99 @@ auto HistoryInner::DelegateMixin()
 	return std::make_unique<HistoryMainElementDelegate>();
 }
 
+TextForMimeData HistoryInner::getDepersonalizedText() const {
+	auto selected = _selected;
+	if (_mouseAction == MouseAction::Selecting && _dragSelFrom && _dragSelTo) {
+		applyDragSelection(&selected);
+	}
+	if (selected.empty()) {
+		return {};
+	}
+
+	struct Part {
+		not_null<HistoryItem*> item;
+		const Data::Group *group = nullptr;
+		int person = 0;
+	};
+
+	auto personMap = base::flat_map<not_null<PeerData*>, int>();
+	auto hiddenPersonMap = base::flat_map<QString, int>();
+	auto personCounter = 1;
+
+	const auto personNumber = [&](not_null<HistoryItem*> item) {
+		if (const auto sender = item->originalSender()) {
+			const auto [it, inserted] = personMap.emplace(sender, personCounter);
+			if (inserted) ++personCounter;
+			return it->second;
+		} else if (const auto hidden = item->originalHiddenSenderInfo()) {
+			const auto [it, inserted] = hiddenPersonMap.emplace(
+				hidden->name,
+				personCounter);
+			if (inserted) ++personCounter;
+			return it->second;
+		}
+		const auto [it, inserted] = personMap.emplace(
+			item->author(),
+			personCounter);
+		if (inserted) ++personCounter;
+		return it->second;
+	};
+
+	auto groups = base::flat_set<not_null<const Data::Group*>>();
+	auto texts = base::flat_map<Data::MessagePosition, Part>();
+
+	const auto addItem = [&](not_null<HistoryItem*> item) {
+		texts.emplace(item->position(), Part{
+			.item = item,
+			.person = personNumber(item),
+		});
+	};
+	const auto addGroup = [&](not_null<const Data::Group*> group) {
+		Expects(!group->items.empty());
+		const auto item = group->items.back();
+		texts.emplace(item->position(), Part{
+			.item = item,
+			.group = group.get(),
+			.person = personNumber(item),
+		});
+	};
+
+	for (const auto &item : selected) {
+		if (const auto group = session().data().groups().find(item)) {
+			if (groups.contains(group)) {
+				continue;
+			}
+			if (isSelectedGroup(&selected, group)) {
+				groups.emplace(group);
+				addGroup(group);
+			} else {
+				addItem(item);
+			}
+		} else {
+			addItem(item);
+		}
+	}
+
+	auto result = TextForMimeData();
+	const auto sep = u"\n"_q;
+	for (auto i = texts.begin(), e = texts.end(); i != e;) {
+		const auto &part = i->second;
+		const auto time = u"[%1] "_q.arg(
+			QLocale().toString(ItemDateTime(part.item), QLocale::ShortFormat));
+		auto line = TextForMimeData::Simple(
+			time + u"Person %1: "_q.arg(part.person));
+		auto body = part.group
+			? HistoryGroupText(not_null<const Data::Group*>{ part.group })
+			: HistoryItemText(part.item);
+		line.append(std::move(body));
+		result.append(std::move(line));
+		if (++i != e) {
+			result.append(sep);
+		}
+	}
+	return result;
+}
+
 void HistoryInner::addDepersonalized(not_null<Ui::RpWidget*> parent) {
 	const auto button = Ui::CreateChild<Ui::IconButton>(
 		parent,
@@ -6319,7 +6471,7 @@ void HistoryInner::addDepersonalized(not_null<Ui::RpWidget*> parent) {
 
 	button->setClickedCallback([=] {
 		if (!showCopyRestrictionForSelected()) {
-			TextUtilities::SetClipboardText(getSelectedText(true));
+			TextUtilities::SetClipboardText(getDepersonalizedText());
 			clearSelected();
 			if (_menu) {
 				_menu->hide();
