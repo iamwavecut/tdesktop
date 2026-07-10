@@ -81,6 +81,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDataStream>
 #include <QtCore/QIODevice>
 
+struct HistoryItem::LocalMessageState {
+	HistoryMessageRevisionHistory revisionHistory;
+	TimeId deletedDate = 0;
+	bool locallyHidden = false;
+};
+
 namespace {
 
 constexpr auto kNotificationTextLimit = 255;
@@ -4513,22 +4519,26 @@ bool HistoryItem::isService() const {
 void HistoryItem::applyLocalMessageState(const MTPMessage &) {
 	auto &local = _history->session().local();
 	const auto id = fullId();
+	const auto ensureState = [&]() {
+		if (!_localMessageState) {
+			_localMessageState = std::make_unique<LocalMessageState>();
+		}
+		return _localMessageState.get();
+	};
 	auto &entries = RevisionStore(local);
 	const auto i = entries.find(id);
 	if (i != entries.end()) {
 		if (!i->second.versions.empty()) {
-			AddComponents(HistoryMessageRevisionHistory::Bit());
-			Get<HistoryMessageRevisionHistory>()->versions = HistorySnapshots(
+			ensureState()->revisionHistory.versions = HistorySnapshots(
 				i->second.versions);
 		}
 		if (i->second.deletedDate) {
-			AddComponents(HistoryMessageDeleted::Bit());
-			Get<HistoryMessageDeleted>()->date = i->second.deletedDate;
+			ensureState()->deletedDate = i->second.deletedDate;
 		}
 	}
 	const auto &hidden = HiddenStore(local);
 	if (hidden.find(id) != hidden.end()) {
-		AddComponents(HistoryMessageLocallyHidden::Bit());
+		ensureState()->locallyHidden = true;
 	}
 }
 
@@ -4536,12 +4546,10 @@ void HistoryItem::recordEditionSnapshot(const MTPMessage &data) {
 	if (isLocallyHidden()) {
 		return;
 	}
-	if (!Has<HistoryMessageRevisionHistory>()) {
-		AddComponents(HistoryMessageRevisionHistory::Bit());
-		Get<HistoryMessageRevisionHistory>()->versions.push_back(
-			SnapshotFromItem(this));
+	if (!_localMessageState) {
+		_localMessageState = std::make_unique<LocalMessageState>();
 	}
-	const auto history = Get<HistoryMessageRevisionHistory>();
+	const auto history = &_localMessageState->revisionHistory;
 	if (history->versions.empty()) {
 		history->versions.push_back(SnapshotFromItem(this));
 	}
@@ -4574,16 +4582,15 @@ void HistoryItem::recordEditionSnapshot(const MTPMessage &data) {
 }
 
 void HistoryItem::markDeleted(TimeId date) {
-	if (const auto deleted = Get<HistoryMessageDeleted>()) {
-		if (deleted->date) {
-			date = deleted->date;
-		}
+	if (!_localMessageState) {
+		_localMessageState = std::make_unique<LocalMessageState>();
+	} else if (_localMessageState->deletedDate) {
+		date = _localMessageState->deletedDate;
 	}
 	if (!date) {
 		date = base::unixtime::now();
 	}
-	AddComponents(HistoryMessageDeleted::Bit());
-	Get<HistoryMessageDeleted>()->date = date;
+	_localMessageState->deletedDate = date;
 
 	auto &local = _history->session().local();
 	auto &entries = RevisionStore(local);
@@ -4598,8 +4605,9 @@ void HistoryItem::markDeleted(TimeId date) {
 		i = entries.emplace(id, StoredMessageRevisionEntry()).first;
 	}
 	auto &entry = i->second;
-	if (const auto history = Get<HistoryMessageRevisionHistory>()) {
-		entry.versions = StoredSnapshots(history->versions);
+	const auto &history = _localMessageState->revisionHistory;
+	if (!history.versions.empty()) {
+		entry.versions = StoredSnapshots(history.versions);
 	} else {
 		entry.versions.push_back(StoredSnapshotFromHistory(
 			SnapshotFromItem(this)));
@@ -4620,7 +4628,10 @@ void HistoryItem::markDeleted(TimeId date) {
 }
 
 void HistoryItem::hideLocally() {
-	AddComponents(HistoryMessageLocallyHidden::Bit());
+	if (!_localMessageState) {
+		_localMessageState = std::make_unique<LocalMessageState>();
+	}
+	_localMessageState->locallyHidden = true;
 	auto &local = _history->session().local();
 	auto &hidden = HiddenStore(local);
 	const auto date = base::unixtime::now();
@@ -4634,11 +4645,11 @@ void HistoryItem::hideLocally() {
 }
 
 bool HistoryItem::isDeleted() const {
-	return Has<HistoryMessageDeleted>();
+	return _localMessageState && _localMessageState->deletedDate;
 }
 
 bool HistoryItem::isLocallyHidden() const {
-	return Has<HistoryMessageLocallyHidden>();
+	return _localMessageState && _localMessageState->locallyHidden;
 }
 
 bool HistoryItem::canRemoveLocally() const {
@@ -4656,21 +4667,23 @@ bool HistoryItem::canRemoveLocally() const {
 }
 
 TimeId HistoryItem::deletedDate() const {
-	if (const auto deleted = Get<HistoryMessageDeleted>()) {
-		return deleted->date;
-	}
-	return 0;
+	return _localMessageState ? _localMessageState->deletedDate : 0;
 }
 
 int HistoryItem::editCount() const {
-	if (const auto history = Get<HistoryMessageRevisionHistory>()) {
-		return std::max(0, int(history->versions.size()) - 1);
+	if (_localMessageState) {
+		return std::max(
+			0,
+			int(_localMessageState->revisionHistory.versions.size()) - 1);
 	}
 	return 0;
 }
 
 const HistoryMessageRevisionHistory *HistoryItem::revisionHistory() const {
-	return Get<HistoryMessageRevisionHistory>();
+	return (_localMessageState
+		&& !_localMessageState->revisionHistory.versions.empty())
+		? &_localMessageState->revisionHistory
+		: nullptr;
 }
 
 bool HistoryItem::unread(not_null<Data::Thread*> thread) const {

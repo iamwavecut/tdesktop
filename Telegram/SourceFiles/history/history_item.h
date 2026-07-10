@@ -672,6 +672,7 @@ public:
 
 private:
 	struct CreateConfig;
+	struct LocalMessageState;
 
 	HistoryItem(
 		not_null<History*> history,
@@ -804,6 +805,7 @@ private:
 
 	std::unique_ptr<Data::Media> _media;
 	std::unique_ptr<Data::MessageReactions> _reactions;
+	std::unique_ptr<LocalMessageState> _localMessageState;
 	crl::time _reactionsLastRefreshed = 0;
 
 	TimeId _date = 0;

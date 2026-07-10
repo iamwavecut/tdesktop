@@ -163,15 +163,6 @@ struct HistoryMessageRichPageSource
 	bool canEdit = false;
 };
 
-struct HistoryMessageDeleted
-: RuntimeComponent<HistoryMessageDeleted, HistoryItem> {
-	TimeId date = 0;
-};
-
-struct HistoryMessageLocallyHidden
-: RuntimeComponent<HistoryMessageLocallyHidden, HistoryItem> {
-};
-
 struct HistoryMessageRevisionSnapshot {
 	QByteArray raw;
 	QString text;
@@ -181,8 +172,7 @@ struct HistoryMessageRevisionSnapshot {
 	int entitiesCount = 0;
 };
 
-struct HistoryMessageRevisionHistory
-: RuntimeComponent<HistoryMessageRevisionHistory, HistoryItem> {
+struct HistoryMessageRevisionHistory {
 	std::vector<HistoryMessageRevisionSnapshot> versions;
 };
 
