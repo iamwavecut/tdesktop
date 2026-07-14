@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_unread_things.h"
 #include "styles/style_dialogs.h" // st::dialogsTextWidthMin
 
 #include "core/fork_settings.h"
@@ -251,6 +252,16 @@ uint64 Entry::computeSortPosition(FilterId filterId) const {
 	const auto index = lookupPinnedIndex(filterId);
 	if (index) {
 		return PinnedDialogPos(index);
+	} else if (UnreadOnTopEnabled()) {
+		if (const auto history = asHistory()) {
+			const auto hasMention = history->unreadMentions().has();
+			const auto hasUnread = (history->unreadCount() > 0) || hasMention;
+			if (!history->isForum()
+				&& ((!history->muted() && hasUnread) || hasMention)) {
+				// Keep such chats right below the pinned dialogs.
+				return PinnedDialogPos(30);
+			}
+		}
 	} else if (UnreadOnTopEnabled() && hasUnreadUnmutedForSort()) {
 		return UnreadOnTopDialogPos(_sortKeyByDate);
 	}
@@ -422,10 +433,15 @@ PositionChange Entry::adjustByPosInChatList(
 }
 
 void Entry::setChatListTimeId(TimeId date) {
-	_timeId = date;
+	const auto was = std::exchange(_timeId, date);
 	updateChatListSortPosition();
 	if (const auto folder = this->folder()) {
 		folder->updateChatListSortPosition();
+	}
+	if (was != date) {
+		if (const auto history = asHistory()) {
+			history->communityChatsListDateChanged(was);
+		}
 	}
 }
 

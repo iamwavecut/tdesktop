@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_transcribes.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_message.h"
+#include "history/view/media/history_view_community_added.h"
 #include "history/view/media/history_view_media_generic.h"
 #include "history/view/media/history_view_media_grouped.h"
 #include "history/view/media/history_view_similar_channels.h"
@@ -36,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/premium_preview_box.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/fork_settings.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
 #include "main/main_app_config.h"
@@ -55,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/round_rect.h"
+#include "data/components/ephemeral_messages.h"
 #include "data/components/sponsored_messages.h"
 #include "data/data_saved_sublist.h"
 #include "data/data_todo_list.h"
@@ -1192,6 +1195,35 @@ void FakeBotAboutTop::init() {
 	height = st::msgNameStyle.font->height + st::botDescSkip;
 }
 
+void EphemeralBadge::init(not_null<const HistoryItem*> item) {
+	if (!text.isEmpty()) {
+		return;
+	}
+	receiver = item->out()
+		? item->history()->session().ephemeralMessages().replyReceiver(item)
+		: nullptr;
+	if (item->out() && !receiver) {
+		return;
+	}
+	text.setText(
+		st::msgNameStyle,
+		(receiver
+			? tr::lng_ephemeral_visible_to(
+				tr::now,
+				lt_user,
+				(receiver->username().isEmpty()
+					? receiver->name()
+					: ('@' + receiver->username())))
+			: tr::lng_ephemeral_visible_you(tr::now)),
+		Ui::NameTextOptions());
+	maxWidth = st::msgPadding.left()
+		+ st::historyEphemeralIconIn.width()
+		+ st::historyEphemeralIconSkip
+		+ text.maxWidth()
+		+ st::msgPadding.right();
+	height = st::msgNameStyle.font->height + st::historyEphemeralBadgeBottom;
+}
+
 Element::Element(
 	not_null<ElementDelegate*> delegate,
 	not_null<HistoryItem*> data,
@@ -1224,6 +1256,9 @@ Element::Element(
 			&& !user->botManagerId()) {
 			AddComponents(FakeBotAboutTop::Bit());
 		}
+	}
+	if (data->isEphemeral()) {
+		AddComponents(EphemeralBadge::Bit());
 	}
 }
 
@@ -1472,7 +1507,26 @@ bool Element::isHiddenByGroup() const {
 }
 
 bool Element::isHidden() const {
-	return isHiddenByGroup();
+	if (isHiddenByGroup()) {
+		return true;
+	}
+	if (Core::ForkSettings::HideFromBlockedUsers()) {
+		const auto item = data();
+		if (!item->out()) {
+			const auto from = item->from();
+			if (from != item->history()->peer
+				&& from->isUser()
+				&& from->isBlocked()) {
+				return true;
+			}
+			if (const auto original = item->originalSender()) {
+				if (original->isUser() && original->isBlocked()) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 void Element::overrideMedia(std::unique_ptr<Media> media) {
@@ -1629,6 +1683,24 @@ void Element::refreshMedia(Element *replacing) {
 				.service = true,
 				.hideServiceText = true,
 			});
+	} else if (const auto added = item->Get<HistoryServiceCommunityAdded>()) {
+		if (!added->community && added->communityId) {
+			// Resolve lazily in case the channel loaded after parse time.
+			added->community = history()->owner().channelLoaded(
+				added->communityId);
+		}
+		if (added->community) {
+			_media = std::make_unique<MediaGeneric>(
+				this,
+				GenerateCommunityAddedMedia(this, added->community),
+				MediaGenericDescriptor{
+					.maxWidth = st::msgServiceGiftBoxSize.width(),
+					.service = true,
+					.hideServiceText = true,
+				});
+		} else {
+			_media = nullptr;
+		}
 	} else {
 		_media = nullptr;
 	}
@@ -2047,13 +2119,13 @@ void Element::validateText() {
 			setTextWithLinks(tr::italic(unavailable));
 		} else {
 			setTextWithLinks(_textItem->translatedTextWithLocalEntities());
-			richPage = _textItem->richPage();
+			richPage = _textItem->translatedRichPage();
 		}
 	}
 	if (!richPage
 		&& !(_flags & Flag::ServiceMessage)
 		&& item->computeUnavailableReason().isEmpty()) {
-		richPage = _textItem->richPage();
+		richPage = _textItem->translatedRichPage();
 	}
 	ensureRichPage(std::move(richPage));
 }

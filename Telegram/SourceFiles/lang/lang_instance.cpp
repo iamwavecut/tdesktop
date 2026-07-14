@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/qthelp_regex.h"
 
+#include "lang_auto_counts.h" // kKeysCount, kTagsCount.
+
 #include <QRegularExpression>
 
 namespace Lang {
@@ -27,6 +29,36 @@ constexpr auto kCloudLangPackName = "tdesktop"_cs;
 constexpr auto kCustomLanguage = "#custom"_cs;
 constexpr auto kLangValuesLimit = 20000;
 constexpr auto kCustomBrand = "Forkgram"_cs;
+
+constexpr const char *kBrandedKeys[] = {
+	"_tray",
+	"lng_error_start_minimized_passcoded",
+	"lng_proxy_unsupported",
+	"lng_bad_photo",
+	"lng_update_telegram",
+	"lng_sure_save_language",
+	"lng_settings_auto_start",
+	"lng_settings_add_sendto",
+	"lng_theme_no_desktop",
+	"lng_download_path_default_radio",
+	"lng_passcode_about",
+	"lng_proxy_sponsor_about",
+	"lng_message_unsupported",
+	"lng_bot_share_location_unavailable",
+	"lng_new_version_wrap",
+	"lng_theme_editor_need_unlock",
+	"lng_payments_not_supported",
+	"lng_group_call_mac_access",
+	"lng_language_not_ready_about",
+	"lng_outdated_",
+	"lng_mac_menu_hide_",
+};
+
+[[nodiscard]] bool IsBrandedKey(const QByteArray &key) {
+	return ranges::any_of(kBrandedKeys, [&](const char *branded) {
+		return key.contains(branded);
+	});
+}
 
 std::vector<QString> PrepareDefaultValues() {
 	auto result = std::vector<QString>();
@@ -731,10 +763,11 @@ QString Instance::getNonDefaultValue(const QByteArray &key) const {
 
 void Instance::applyValue(const QByteArray &key, const QByteArray &value) {
 	_nonDefaultValues[key] = value;
+	const auto branded = IsBrandedKey(key);
 	ParseKeyValue(key, value, [&](ushort key, QString &&value) {
 		_nonDefaultSet[key] = 1;
 		if (!_derived) {
-			if (ranges::contains(tr::hasTelegram, key)) {
+			if (branded) {
 				auto v = std::move(value);
 				_values[key] = v.replace(
 					QRegularExpression("Telegram"),

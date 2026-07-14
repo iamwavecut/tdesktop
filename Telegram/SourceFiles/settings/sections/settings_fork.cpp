@@ -978,16 +978,6 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 		});
 
 	//
-	addRestart(
-		u"fork/primary_unmuted"_q,
-		{ u"primary"_q, u"unmuted"_q, u"dialogs"_q },
-		tr::lng_settings_primary_unmuted(),
-		[] { return Core::App().settings().fork().primaryUnmutedMessages(); },
-		[](bool checked) {
-			Core::App().settings().fork().setPrimaryUnmutedMessages(checked);
-		});
-
-	//
 	add(
 		u"fork/remember_media_menu"_q,
 		{ u"remember"_q, u"media"_q, u"menu"_q },
@@ -1045,6 +1035,16 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 		[] { return Core::App().settings().fork().archivedStoriesAreHidden(); },
 		[](bool checked) {
 			Core::App().settings().fork().setArchivedStoriesAreHidden(checked);
+		});
+
+	//
+	add(
+		u"fork/hide_from_blocked_users"_q,
+		{ u"hide"_q, u"blocked"_q, u"users"_q, u"messages"_q },
+		tr::lng_settings_hide_from_blocked_users(),
+		[] { return Core::App().settings().fork().hideFromBlockedUsers(); },
+		[](bool checked) {
+			Core::App().settings().fork().setHideFromBlockedUsers(checked);
 		});
 
 	builder.addSkip();
