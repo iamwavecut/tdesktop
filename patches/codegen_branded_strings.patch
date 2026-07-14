@@ -1,21 +1,25 @@
 diff --git a/codegen/lang/generator.cpp b/codegen/lang/generator.cpp
-index c12de72..be7d16f 100644
+index 07e5b60..f22452d 100644
 --- a/codegen/lang/generator.cpp
 +++ b/codegen/lang/generator.cpp
-@@ -183,6 +183,7 @@ struct phrase<" << tags.join(", ") << "> {\n\
- }
+@@ -185,7 +185,7 @@ inline constexpr auto kKeysCount = ushort(" << keysCount_ << ");\n\
  
- void Generator::writeHeaderProducersInstances() {
-+	auto indexesWithTelegram = std::vector<int>();
- 	auto index = 0;
- 	for (auto &entry : langpack_.entries) {
- 		const auto isPlural = !entry.keyBase.isEmpty();
-@@ -196,9 +197,49 @@ void Generator::writeHeaderProducersInstances() {
- 			header_->stream() << "\
- inline constexpr phrase<" << tags.join(", ") << "> " << (isPlural ? entry.keyBase : key) << "{ ushort(" << index << ") };\n";
- 		}
-+		const auto goodKey = [&](const QString &s) {
-+			return entry.key.contains(s);
+ bool Generator::writeAllKeys() {
+ 	auto file = common::CppFile(basePath_ + "_keys.h", project_);
+-	file.include(baseName_ + ".h").newline();
++	file.includeFromLibrary("array").include(baseName_ + ".h").newline();
+ 	file.pushNamespace("tr").newline();
+ 	for (const auto &[combination, code] : specializations_) {
+ 		file.stream() << code;
+@@ -193,6 +193,43 @@ bool Generator::writeAllKeys() {
+ 	for (const auto &declaration : declarations_) {
+ 		file.stream() << declaration << "\n";
+ 	}
++	auto brandedIndices = QStringList();
++	for (auto i = 0, count = int(langpack_.entries.size()); i != count; ++i) {
++		const auto &entry = langpack_.entries[i];
++		const auto goodKey = [&](const QString &value) {
++			return entry.key.contains(value);
 +		};
 +		if (entry.value.contains("Telegram")
 +			&& (goodKey("_tray")
@@ -31,32 +35,23 @@ index c12de72..be7d16f 100644
 +				|| goodKey("lng_download_path_default_radio")
 +				|| goodKey("lng_passcode_about")
 +				|| goodKey("lng_proxy_sponsor_about")
-+				|| goodKey("lng_passcode_about")
 +				|| goodKey("lng_message_unsupported")
 +				|| goodKey("lng_bot_share_location_unavailable")
 +				|| goodKey("lng_new_version_wrap")
 +				|| goodKey("lng_theme_editor_need_unlock")
 +				|| goodKey("lng_payments_not_supported")
 +				|| goodKey("lng_group_call_mac_access")
-+				|| goodKey("lng_payments_not_supported")
 +				|| goodKey("lng_language_not_ready_about")
 +				|| goodKey("lng_outdated_")
-+				|| goodKey("lng_mac_menu_hide_")
-+			)) {
-+			indexesWithTelegram.push_back(index);
++				|| goodKey("lng_mac_menu_hide_"))) {
++			brandedIndices.push_back(QString::number(indices_[i]));
 +		}
- 		++index;
- 	}
- 	header_->newline();
-+
-+	////////
-+	auto indexesWithTelegramString = QString();
-+	for (const auto &i : indexesWithTelegram) {
-+		indexesWithTelegramString += QString::number(i) + ", ";
 +	}
-+	header_->stream() << "\
-+inline constexpr std::array<int, " << indexesWithTelegram.size() << "> hasTelegram = {" << indexesWithTelegramString << " };\n";
-+	header_->newline();
++	file.stream() << "\ninline constexpr std::array<int, "
++		<< brandedIndices.size()
++		<< "> hasTelegram = { "
++		<< brandedIndices.join(", ")
++		<< " };\n";
+ 	file.newline().popNamespace();
+ 	return file.finalize();
  }
- 
- bool Generator::writeSource() {
