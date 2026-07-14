@@ -79,6 +79,8 @@ public:
 		ActiveChat activeChat,
 		SendActionPainter *sendAction);
 	void setCustomTitle(const QString &title);
+	void setTitleShownRatio(float64 shown);
+	[[nodiscard]] int titleLeft() const;
 	void setClearDeletedMessagesCount(int count);
 
 	void showChooseMessagesForReport(Data::ReportInput reportInput);

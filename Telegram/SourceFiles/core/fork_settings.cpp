@@ -79,7 +79,7 @@ QByteArray ForkSettings::serialize() const {
 		+ Serialize::stringSize(_summaryApiBaseUrl)
 		+ Serialize::stringSize(_summaryApiKey)
 		+ Serialize::stringSize(_summaryModel)
-		+ sizeof(qint32);
+		+ sizeof(qint32) * 2;
 	for (const auto &rule : _linkRewrites) {
 		size += Serialize::stringSize(rule.sourceHost)
 			+ Serialize::stringSize(rule.targetHost);
@@ -123,6 +123,7 @@ QByteArray ForkSettings::serialize() const {
 		for (const auto &rule : _linkRewrites) {
 			stream << rule.sourceHost << rule.targetHost;
 		}
+		stream << qint32(_hideFromBlockedUsers ? 1 : 0);
 	}
 	return result;
 }
@@ -237,6 +238,9 @@ void ForkSettings::addFromSerialized(const QByteArray &serialized) {
 				stream.setStatus(QDataStream::ReadCorruptData);
 			}
 		}
+	}
+	if (!stream.atEnd()) {
+		stream >> hideFromBlockedUsers;
 	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
@@ -366,6 +370,14 @@ void ForkSettings::setBotsPlatforms(QString newValue) {
 }
 void ForkSettings::setArchivedStoriesAreHidden(bool newValue) {
 	_archivedStoriesAreHidden = newValue;
+}
+
+[[nodiscard]] bool ForkSettings::hideFromBlockedUsers() const {
+	return _hideFromBlockedUsers;
+}
+void ForkSettings::setHideFromBlockedUsers(bool newValue) {
+	StaticHideFromBlockedUsers = newValue;
+	_hideFromBlockedUsers = newValue;
 }
 
 void ForkSettings::setLinkRewrites(std::vector<LinkRewriteRule> newValue) {

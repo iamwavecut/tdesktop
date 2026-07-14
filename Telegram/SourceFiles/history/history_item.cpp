@@ -86,6 +86,7 @@ struct HistoryItem::LocalMessageState {
 	HistoryMessageRevisionHistory revisionHistory;
 	TimeId deletedDate = 0;
 	bool locallyHidden = false;
+	bool unreadSummary = false;
 };
 
 namespace {
@@ -1311,6 +1312,10 @@ HistoryItem::HistoryItem(
 	}
 	if (isGuestChatBotMessage()) {
 		_history->setHasGuestChatBotMessages();
+	}
+	if (fields.unreadSummary) {
+		_localMessageState = std::make_unique<LocalMessageState>();
+		_localMessageState->unreadSummary = true;
 	}
 }
 
@@ -4696,6 +4701,10 @@ bool HistoryItem::isDeleted() const {
 
 bool HistoryItem::isLocallyHidden() const {
 	return _localMessageState && _localMessageState->locallyHidden;
+}
+
+bool HistoryItem::isUnreadSummary() const {
+	return _localMessageState && _localMessageState->unreadSummary;
 }
 
 bool HistoryItem::canRemoveLocally() const {

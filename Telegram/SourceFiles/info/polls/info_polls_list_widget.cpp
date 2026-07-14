@@ -934,6 +934,41 @@ bool ListWidget::Inner::cornerButtonsSummarizeDownLoading() {
 	return false;
 }
 
+InlinePolls ListWidget::MakeInline(
+		not_null<Ui::RpWidget*> parent,
+		not_null<AbstractController*> controller,
+		Fn<void(int top)> scrollToRequest) {
+	auto inner = std::make_shared<Inner>(
+		parent,
+		controller,
+		std::move(scrollToRequest));
+	const auto raw = inner.get();
+	return {
+		.list = raw->list(),
+		.updateGeometry = [raw](int width, int viewportHeight) {
+			raw->updateGeometry(Rect(QSize(width, viewportHeight)));
+		},
+		.setVisibleRegion = [raw](int top, int bottom) {
+			raw->setInlineVisibleRegion(top, bottom);
+		},
+		.paintBackground = [raw](QPainter &p, QRect clip) {
+			raw->paintBackground(p, clip);
+		},
+		.selectedItems = raw->selectedItems(),
+		.selectionAction = [raw](SelectionAction action) {
+			raw->selectionAction(action);
+		},
+		.setSearchQuery = [raw](const QString &query) {
+			raw->setSearchQuery(query);
+		},
+		.canCreatePoll = raw->canCreatePoll(),
+		.createPoll = [raw] {
+			raw->createPoll();
+		},
+		.guard = std::move(inner),
+	};
+}
+
 // --- ListMemento ---
 
 ListMemento::ListMemento(

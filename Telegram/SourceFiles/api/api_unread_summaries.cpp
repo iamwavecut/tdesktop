@@ -419,6 +419,7 @@ void EnsureServiceNotificationsUser(not_null<Main::Session*> session) {
 		MTPPeerColor(),
 		MTPint(),
 		MTPlong(),
+		MTPlong(),
 		MTPlong()));
 }
 
@@ -970,7 +971,7 @@ FullMsgId UnreadSummaries::injectSummary(
 		const TextWithEntities &text) {
 	EnsureServiceNotificationsUser(_session);
 	const auto history = thread->owningHistory();
-	auto flags = (MessageFlag::HasFromId | MessageFlag::UnreadSummary);
+	auto flags = MessageFlags(MessageFlag::HasFromId);
 	auto replyTo = FullReplyTo();
 	if (const auto topicRootId = thread->topicRootId()) {
 		flags |= MessageFlag::HasReplyInfo;
@@ -987,6 +988,7 @@ FullMsgId UnreadSummaries::injectSummary(
 		.from = PeerData::kServiceNotificationsId,
 		.replyTo = replyTo,
 		.date = base::unixtime::now(),
+		.unreadSummary = true,
 	}, text, MTP_messageMediaEmpty());
 	return item->fullId();
 }

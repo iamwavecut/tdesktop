@@ -1015,6 +1015,17 @@ void TopBarWidget::setCustomTitle(const QString &title) {
 	}
 }
 
+void TopBarWidget::setTitleShownRatio(float64 shown) {
+	if (_titleShownRatio != shown) {
+		_titleShownRatio = shown;
+		update();
+	}
+}
+
+int TopBarWidget::titleLeft() const {
+	return _leftTaken;
+}
+
 void TopBarWidget::setClearDeletedMessagesCount(int count) {
 	count = std::max(count, 0);
 	if (_clearDeletedMessagesCount == count) {

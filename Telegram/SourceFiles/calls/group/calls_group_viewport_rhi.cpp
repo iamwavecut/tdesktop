@@ -677,19 +677,9 @@ void Viewport::RendererRhi::renderOffscreen(
 	}
 }
 
-void Viewport::RendererRhi::renderOnscreen(
-		QRhi *rhi,
-		QRhiRenderTarget *rt,
-		QRhiCommandBuffer *cb) {
-	if (!_initialized) {
-		return;
-	}
-	_rhi = rhi;
-	_rt = rt;
-	_cb = cb;
-
-	const auto pw = float(rt->pixelSize().width());
-	const auto ph = float(rt->pixelSize().height());
+void Viewport::RendererRhi::collectOnscreenDraws() {
+	const auto pw = float(_rt->pixelSize().width());
+	const auto ph = float(_rt->pixelSize().height());
 
 	auto index = 0;
 	for (const auto &tile : _owner->_tiles) {

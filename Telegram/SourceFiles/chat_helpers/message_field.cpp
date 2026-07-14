@@ -905,7 +905,9 @@ Fn<bool(
 			link,
 			std::move(callback),
 			fieldStyle,
-			validate));
+			validate,
+			interactionActive,
+			restoreFocus));
 		return true;
 	};
 }

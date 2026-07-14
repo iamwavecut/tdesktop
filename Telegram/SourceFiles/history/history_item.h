@@ -105,6 +105,7 @@ struct HistoryItemCommonFields {
 	bool ignoreForwardFrom = false;
 	bool ignoreForwardCaptions = false;
 	bool mediaSpoiler = false;
+	bool unreadSummary = false;
 };
 
 enum class HistoryReactionSource : char {
@@ -364,9 +365,7 @@ public:
 	[[nodiscard]] bool textAppearingStarted() const {
 		return _flags & MessageFlag::TextAppearingStarted;
 	}
-	[[nodiscard]] bool isUnreadSummary() const {
-		return _flags & MessageFlag::UnreadSummary;
-	}
+	[[nodiscard]] bool isUnreadSummary() const;
 	[[nodiscard]] bool hasRealFromId() const;
 	[[nodiscard]] bool isPostHidingAuthor() const;
 	[[nodiscard]] bool isPostShowingAuthor() const;

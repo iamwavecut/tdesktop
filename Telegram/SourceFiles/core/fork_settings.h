@@ -26,6 +26,7 @@ class ForkSettings final {
 public:
 	ForkSettings();
 
+	[[nodiscard]] static bool HideFromBlockedUsers();
 	[[nodiscard]] static bool PrimaryUnmutedMessages();
 	[[nodiscard]] static QString NormalizeLinkRewriteHost(QString value);
 	[[nodiscard]] static const std::vector<LinkRewriteRule> &DefaultLinkRewrites();
@@ -141,6 +142,9 @@ public:
 	[[nodiscard]] bool archivedStoriesAreHidden() const;
 	void setArchivedStoriesAreHidden(bool newValue);
 
+	[[nodiscard]] bool hideFromBlockedUsers() const;
+	void setHideFromBlockedUsers(bool newValue);
+
 	[[nodiscard]] QString summaryApiBaseUrl() const {
 		return _summaryApiBaseUrl;
 	}
@@ -187,6 +191,7 @@ private:
 	bool _additionalButtonsWebBot = false;
 	QString _botsPlatforms;
 	bool _archivedStoriesAreHidden = false;
+	bool _hideFromBlockedUsers = false;
 	QString _summaryApiBaseUrl;
 	QString _summaryApiKey;
 	QString _summaryModel;
