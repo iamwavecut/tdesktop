@@ -18,7 +18,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Get version
       id: version
@@ -35,7 +35,7 @@ jobs:
       shell: pwsh
 
     - name: Download x64 zip
-      uses: robinraju/release-downloader@v1.12
+      uses: robinraju/release-downloader@v1
       with:
         repository: ${{ github.repository }}
         tag: ${{ steps.version.outputs.version_full }}
@@ -43,7 +43,7 @@ jobs:
         out-file-path: ./artifacts/x64/
 
     - name: Download x86 zip
-      uses: robinraju/release-downloader@v1.12
+      uses: robinraju/release-downloader@v1
       with:
         repository: ${{ github.repository }}
         tag: ${{ steps.version.outputs.version_full }}
@@ -72,7 +72,7 @@ jobs:
     - name: Get release ID by tag.
       id: get_release
       if: github.event_name == 'workflow_dispatch'
-      uses: cardinalby/git-get-release-action@master
+      uses: cardinalby/git-get-release-action@v1
       env:
         GITHUB_TOKEN: ${{ github.token }}
       with:
@@ -132,7 +132,7 @@ jobs:
         }
 
     - name: Upload x64 installer to release
-      uses: lovasoa/upload-release-asset@master
+      uses: lovasoa/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -142,7 +142,7 @@ jobs:
         asset_content_type: application/octet-stream
 
     - name: Upload x86 installer to release
-      uses: lovasoa/upload-release-asset@master
+      uses: lovasoa/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
