@@ -152,7 +152,7 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 	.description = "Show when you join Channel under its Description.",
 });
 
-rpl::producer<TextWithEntities> IDValue(not_null<PeerData*> peer) {
+[[maybe_unused]] rpl::producer<TextWithEntities> IDValue(not_null<PeerData*> peer) {
 	const auto peerId = peer->id;
 	const auto id = peer->isUser()
 		? peerToUser(peerId).bare

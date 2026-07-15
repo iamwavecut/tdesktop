@@ -69,7 +69,7 @@ parts:
       craftctl set version="$version"
     override-build: |
       craftctl default
-      "$CRAFT_PART_SRC/Telegram/build/minidebug.sh" "$CRAFT_PART_INSTALL/usr/bin/Telegram"
+      "$CRAFT_PART_SRC/Telegram/build/minidebug.sh" "$CRAFT_PART_INSTALL/usr/bin/Forkgram"
       mv "$CRAFT_PART_INSTALL"/usr/bin/{Forkgram,forkgram}
 
       APP_ID=io.github.forkgram.tdesktop
