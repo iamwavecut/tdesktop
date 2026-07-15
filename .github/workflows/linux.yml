@@ -213,7 +213,7 @@ jobs:
           -D DESKTOP_APP_SPECIAL_TARGET=linux \
           $DEFINE
 
-          strip -s out/MinSizeRel/Forkgram
+          Telegram/build/minidebug.sh out/MinSizeRel/Forkgram
 
       - name: Check.
         if: env.ONLY_CACHE == 'false'
