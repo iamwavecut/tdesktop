@@ -247,6 +247,20 @@ void MarkAsReadChatList(not_null<Dialogs::MainList*> list) {
 	ranges::for_each(mark, MarkAsReadThread);
 }
 
+void MuteAllChatList(not_null<Dialogs::MainList*> list) {
+	auto mute = std::vector<not_null<Data::Thread*>>();
+	for (const auto &row : list->indexed()->all()) {
+		if (const auto history = row->history()) {
+			if (!history->owner().notifySettings().isMuted(history)) {
+				mute.push_back(history);
+			}
+		}
+	}
+	for (const auto &thread : mute) {
+		thread->owner().notifySettings().update(thread, { .forever = true });
+	}
+}
+
 void PeerMenuAddMuteSubmenuAction(
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread,
@@ -2850,9 +2864,11 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 			const auto count = delegate()->peerListSelectedRowsCount();
 			const auto forum = row->peer()->isForum();
 			const auto monoforum = row->peer()->isMonoforum();
-			if (showLockedError(row) || (count && (forum || monoforum))) {
+			const auto community = JoinedCommunityChats(row->peer());
+			if (showLockedError(row)
+				|| (count && (forum || monoforum || community))) {
 				return;
-			} else if (forum || monoforum) {
+			} else if (forum || monoforum || community) {
 				ChooseRecipientBoxController::rowClicked(row);
 			} else {
 				delegate()->peerListSetRowChecked(row, !row->checked());
@@ -2870,7 +2886,8 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 			}
 			if (!row->checked()
 				&& !row->peer()->isForum()
-				&& !row->peer()->isMonoforum()) {
+				&& !row->peer()->isMonoforum()
+				&& !JoinedCommunityChats(row->peer())) {
 				auto menu = base::make_unique_q<Ui::PopupMenu>(
 					parent,
 					st::popupMenuWithIcons);
@@ -3167,9 +3184,11 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			const auto count = delegate()->peerListSelectedRowsCount();
 			const auto forum = row->peer()->isForum();
 			const auto monoforum = row->peer()->isMonoforum();
-			if (showLockedError(row) || (count && (forum || monoforum))) {
+			const auto community = JoinedCommunityChats(row->peer());
+			if (showLockedError(row)
+				|| (count && (forum || monoforum || community))) {
 				return;
-			} else if (!count || forum || monoforum) {
+			} else if (!count || forum || monoforum || community) {
 				ChooseRecipientBoxController::rowClicked(row);
 			} else if (count) {
 				delegate()->peerListSetRowChecked(row, !row->checked());
@@ -3182,7 +3201,8 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 				not_null<PeerListRow*> row) override final {
 			if (!row->checked()
 				&& !row->peer()->isForum()
-				&& !row->peer()->isMonoforum()) {
+				&& !row->peer()->isMonoforum()
+				&& !JoinedCommunityChats(row->peer())) {
 				auto menu = base::make_unique_q<Ui::PopupMenu>(
 					parent,
 					st::popupMenuWithIcons);
@@ -4065,6 +4085,42 @@ void MenuAddMarkAsReadChatListAction(
 		&st::menuIconMarkRead);
 }
 
+void MenuAddMuteAllChatListAction(
+		not_null<Window::SessionController*> controller,
+		Fn<not_null<Dialogs::MainList*>()> &&list,
+		const PeerMenuCallback &addAction) {
+	const auto hasUnmuted = [&] {
+		for (const auto &row : list()->indexed()->all()) {
+			if (const auto history = row->history()) {
+				if (!history->owner().notifySettings().isMuted(history)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}();
+	if (!hasUnmuted) {
+		return;
+	}
+
+	auto callback = [=] {
+		auto boxCallback = [=](Fn<void()> &&close) {
+			MuteAllChatList(list());
+			close();
+		};
+		controller->show(
+			Ui::MakeConfirmBox({
+				tr::lng_mute_all_sure(),
+				std::move(boxCallback)
+			}),
+			Ui::LayerOption::CloseOther);
+	};
+	addAction(
+		tr::lng_mute_all(tr::now),
+		std::move(callback),
+		&st::menuIconMute);
+}
+
 void ToggleHistoryArchived(
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<History*> history,
@@ -4561,6 +4617,11 @@ void ForwardToSelf(
 						.text = std::move(phrase),
 						.filter = ChatHelpers::ForwardedToSavedMessagesFilter(
 							session),
+						.iconLottie = ChatHelpers::ForwardedMessagePhraseIcon({
+							.toCount = 1,
+							.to1 = session->user(),
+						}),
+						.iconLottieSize = st::toastLottieIconSize,
 					});
 				}
 			});
