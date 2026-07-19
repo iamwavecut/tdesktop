@@ -5345,6 +5345,17 @@ MessageIdsList HistoryInner::getSelectedItems() const {
 	return result;
 }
 
+auto HistoryInner::getSelectedEphemeral() const
+-> std::vector<not_null<HistoryItem*>> {
+	auto result = std::vector<not_null<HistoryItem*>>();
+	for (const auto &item : _selected) {
+		if (item->isEphemeral()) {
+			result.push_back(item);
+		}
+	}
+	return result;
+}
+
 MessageIdsList HistoryInner::getSelectedItemsForLocalClear() const {
 	using namespace ranges;
 
