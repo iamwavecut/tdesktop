@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_response.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/connection_abstract.h"
+#include "mtproto/websocket_relays.h"
 #include "base/random.h"
 #include "base/qthelp_url.h"
 #include "base/openssl_help.h"
@@ -194,7 +195,8 @@ void SessionPrivate::appendTestConnection(
 		DcOptions::Variants::Protocol protocol,
 		const QString &ip,
 		int port,
-		const bytes::vector &protocolSecret) {
+		const bytes::vector &protocolSecret,
+		const QString &webSocketPath) {
 	QWriteLocker lock(&_stateMutex);
 
 	const auto priority = (qthelp::is_ipv6(ip) ? (OptionPreferIPv6.value() ? 2 : 0) : 1)
@@ -244,7 +246,8 @@ void SessionPrivate::appendTestConnection(
 			port,
 			protocolSecret,
 			protocolDcId,
-			protocolForFiles);
+			protocolForFiles,
+			webSocketPath);
 	});
 }
 
@@ -1031,9 +1034,26 @@ void SessionPrivate::connectToServer(bool afterConfig) {
 			return;
 		}
 	}
+	const auto webSocketUsable = (_currentDcType == DcType::Regular
+			|| _currentDcType == DcType::MediaCluster)
+		&& (_options->proxy.type != ProxyData::Type::Mtproto)
+		&& !_options->proxy.tryCustomResolve();
+	const auto webSocketRelay = webSocketUsable
+		? WebSocketRelays::Instance().domainForDc(bareDc)
+		: QString();
+
 	if (_options->proxy.type == ProxyData::Type::Mtproto) {
 		// host, port, secret for mtproto proxy are taken from proxy.
 		appendTestConnection(DcOptions::Variants::Tcp, {}, 0, {});
+	} else if (!webSocketRelay.isEmpty()) {
+		// No "-1" for media here, the pool domains have no such records -
+		// media is already signalled by the negative protocol dc id.
+		appendTestConnection(
+			DcOptions::Variants::Tcp,
+			u"kws%1.%2"_q.arg(bareDc).arg(webSocketRelay),
+			443,
+			{},
+			(_instance->isTestMode() ? u"/apiws_test"_q : u"/apiws"_q));
 	} else {
 		using Variants = DcOptions::Variants;
 		const auto special = (_currentDcType == DcType::Temporary);
@@ -1340,6 +1360,8 @@ void SessionPrivate::handleReceived() {
 			LOG(("TCP Error: bad msg_len received %1, data size: %2").arg(messageLength).arg(encryptedBytesCount));
 			return restart();
 		}
+
+		_connection->verifiedDataReceived();
 
 		if (Logs::DebugEnabled()) {
 			_connection->logInfo(u"Decrypted message %1,%2,%3 is %4 len"_q

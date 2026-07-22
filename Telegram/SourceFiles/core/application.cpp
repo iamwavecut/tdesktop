@@ -64,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_open_common.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/mtproto_config.h"
+#include "mtproto/websocket_relays.h"
 #include "media/audio/media_audio_track.h"
 #include "media/player/media_player_instance.h"
 #include "media/player/media_player_float.h"
@@ -1814,6 +1815,11 @@ void Application::postponeCall(FnMut<void()> &&callable) {
 
 void Application::refreshGlobalProxy() {
 	Sandbox::Instance().refreshGlobalProxy();
+
+	auto &relays = MTP::WebSocketRelays::Instance();
+	relays.applyConfig();
+
+	relays.refresh();
 }
 
 void QuitAttempt() {

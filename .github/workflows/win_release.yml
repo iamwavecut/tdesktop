@@ -1,0 +1,655 @@
+name: Windows Release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Which architectures to build.'
+        type: choice
+        options: [both, x64, x86]
+        default: both
+      only_cache:
+        description: 'Only prepare libraries and warm the cache.'
+        type: boolean
+        default: false
+      qt6:
+        description: 'Build against Qt 6. Required: lib_ui uses Qt 6 only accessibility API.'
+        type: boolean
+        default: true
+      lto:
+        description: 'Enable LTO (official builds use it, links much slower).'
+        type: boolean
+        default: false
+      publish_release:
+        description: 'Publish a GitHub Release with the artifacts.'
+        type: boolean
+        default: false
+      telegram:
+        description: 'Publish update files to the Telegram channels (manual runs).'
+        type: choice
+        # 'off' must be quoted: YAML reads the bare word as boolean false, dropping it from the choices.
+        options: ['off', scheduled, testing, released]
+        default: 'off'
+  push:
+    tags:
+      - 'v*'
+  schedule:
+    # Keep the library and Qt caches from the 7-day eviction; rebuilds only what changed.
+    - cron: '0 3 * * 1,4'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: win-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  windows-release:
+    name: Windows ${{ matrix.arch }} Release
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    strategy:
+      # One arch can finish even if the other fails.
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.arch != 'both') && format('["{0}"]', inputs.arch) || '["x64","x86"]') }}
+
+    env:
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      # Everything the two architectures name differently.
+      BUILD_TARGET: ${{ matrix.arch == 'x64' && 'win64' || 'win' }}
+      MSVC_ARCH: ${{ matrix.arch == 'x64' && 'x64' || 'x64_x86' }}
+      LIBS_SUBDIR: ${{ matrix.arch == 'x64' && '\win64' || '' }}
+      ISS_TARGET: ${{ matrix.arch == 'x64' && 'win64' || 'win32' }}
+      UPD_PREFIX: ${{ matrix.arch == 'x64' && 'tx64upd' || 'tupdate' }}
+      SETUP_PREFIX: ${{ matrix.arch == 'x64' && 'tsetup-x64' || 'tsetup' }}
+      MODULES_ARCH: ${{ matrix.arch == 'x64' && 'x64' || 'x86' }}
+      # Release asset names as the fork labels them (x86 = x32).
+      ASSET_INSTALLER: ${{ matrix.arch == 'x64' && 'Telegram.Windows.x64.Installer.exe' || 'Telegram.Windows.x32.Installer.exe' }}
+      ASSET_PORTABLE: ${{ matrix.arch == 'x64' && 'Telegram.zip' || 'Telegram_x86.zip' }}
+      # A scheduled run only warms caches - never builds Telegram or publishes.
+      ONLY_CACHE: ${{ (github.event_name == 'schedule' || inputs.only_cache) && 'true' || 'false' }}
+      ENABLE_LTO: ${{ inputs.lto && 'true' || 'false' }}
+      # Qt 5 can't compile lib_ui's Qt 6 accessibility API, so qt6 stays on (tags included).
+      QT_OPTION: ${{ (github.event_name != 'workflow_dispatch' || inputs.qt6) && 'qt6' || '' }}
+      PUBLISH_RELEASE: ${{ (inputs.publish_release || startsWith(github.ref, 'refs/tags/')) && 'true' || 'false' }}
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      # Qt 6 debug+release PDBs exhaust the image; drop toolchains this build never uses (keep Perl/Python).
+      - name: Free up runner disk space.
+        shell: pwsh
+        run: |
+          function Show-Free($label) {
+            Write-Host ("{0}: {1:N1} GB free" -f $label, ((Get-PSDrive C).Free / 1GB))
+          }
+          Show-Free 'before'
+
+          $targets = @(
+            'C:\Android',
+            'C:\Miniconda',
+            'C:\Julia',
+            'C:\Program Files\MongoDB',
+            'C:\Program Files\MySQL',
+            'C:\Program Files\PostgreSQL',
+            'C:\Program Files\Amazon',
+            'C:\Program Files\Microsoft SQL Server',
+            'C:\Program Files (x86)\Microsoft SQL Server',
+            'C:\Program Files (x86)\Google',
+            'C:\Program Files\R',
+            'C:\hostedtoolcache\windows\Java_Temurin-Hotspot_jdk',
+            'C:\hostedtoolcache\windows\Ruby',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\node',
+            'C:\hostedtoolcache\windows\PyPy',
+            'C:\tools\kotlinc',
+            'C:\SeleniumWebDrivers'
+          )
+          foreach ($target in $targets) {
+            if (Test-Path $target) {
+              Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
+              Write-Host "removed $target"
+            }
+          }
+          Show-Free 'after'
+
+      # Build on D: (C: is too small); keep the symlink for actions/checkout and short Qt paths.
+      - name: Prepare directories.
+        run: |
+          if exist D:\ (
+            mkdir D:\TBuild\Libraries
+            mklink /d %GITHUB_WORKSPACE%\TBuild D:\TBuild
+          ) else (
+            mkdir %userprofile%\TBuild\Libraries
+            mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          )
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries%LIBS_SUBDIR%>>%GITHUB_ENV%
+
+      # Check out into 'tdesktop' so %ROOT_DIR%\tdesktop\patches resolves the same in CI and locally.
+      - name: Set the build directory name.
+        shell: bash
+        run: echo "REPO_NAME=tdesktop" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          # Release libraries are built too, so these caches must not collide with win.yml.
+          echo "release" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: Read version.
+        shell: bash
+        run: |
+          awk 'NF { print $1"="$2 }' $TBUILD/$REPO_NAME/Telegram/build/version >> $GITHUB_ENV
+          source <(awk 'NF { print $1"="$2 }' $TBUILD/$REPO_NAME/Telegram/build/version)
+
+          if [ "$AlphaVersion" != "0" ]; then
+            echo "AppVersionStrFull=${AppVersionStr}_${AlphaVersion}" >> $GITHUB_ENV
+          elif [ "$BetaChannel" != "0" ]; then
+            echo "AppVersionStrFull=${AppVersionStr}.beta" >> $GITHUB_ENV
+          else
+            echo "AppVersionStrFull=${AppVersionStr}" >> $GITHUB_ENV
+          fi
+          echo "Building version $AppVersionStr ($AppVersion)."
+
+          if [ "$ENABLE_LTO" == "true" ]; then
+            echo "LTO_FLAG=-D DESKTOP_APP_ENABLE_LTO=ON" >> $GITHUB_ENV
+          else
+            echo "LTO_FLAG=" >> $GITHUB_ENV
+          fi
+
+      - name: Set up DesktopPrivate.
+        shell: bash
+        env:
+          API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+          PACKER_KEY: ${{ secrets.PACKER_PRIVATE_KEY }}
+          PACKER_BETA_KEY: ${{ secrets.PACKER_PRIVATE_BETA_KEY }}
+          ALPHA_KEY: ${{ secrets.ALPHA_PRIVATE_KEY }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os, pathlib
+
+          private = pathlib.Path(os.environ['TBUILD']) / 'DesktopPrivate'
+          private.mkdir(parents=True, exist_ok=True)
+
+          def literal(name, pem, static=False):
+              lines = [l.strip() for l in pem.strip().splitlines() if l.strip()]
+              body = ''.join(l + '\\n\\\n' for l in lines[:-1]) + lines[-1] + '\\\n'
+              return '%sconst char *%s = "\\\n%s";\n' % ('static ' if static else '', name, body)
+
+          # configure.py only regex-scans this one for the API credentials.
+          (private / 'custom_api_id.h').write_text(
+              'static const int32 ApiId = %s;\n'
+              'static const char *ApiHash = "%s";\n'
+              % (os.environ['API_ID'], os.environ['API_HASH']))
+
+          # packer.cpp declares both of these extern, so they must be defined here.
+          (private / 'packer_private.h').write_text(
+              literal('PrivateKey', os.environ['PACKER_KEY'])
+              + '\n'
+              + literal('PrivateBetaKey', os.environ['PACKER_BETA_KEY']))
+
+          # config.h defines this one static in its fallback branch, so match that.
+          (private / 'alpha_private.h').write_text(
+              literal('AlphaPrivateKey', os.environ['ALPHA_KEY'], static=True))
+          PY
+
+          # Presence of this file makes run_cmake.py build Packer (DESKTOP_APP_SPECIAL_TARGET).
+          echo "$BUILD_TARGET" > $TBUILD/$REPO_NAME/Telegram/build/target
+
+          echo "DesktopPrivate contents:"
+          ls -l $TBUILD/DesktopPrivate
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ env.MSVC_ARCH }}
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      # breakpad's dump_syms needs ATL at a legacy VC path Visual Studio dropped.
+      - name: Make ATL available.
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          Write-Host "Visual Studio: $vs"
+
+          function Find-AtlRoot {
+            # Prefer the ATL shipped with the toolset we actually compile with.
+            if ($env:VCToolsInstallDir) {
+              $preferred = Join-Path $env:VCToolsInstallDir 'atlmfc'
+              if (Test-Path (Join-Path $preferred 'include\atlbase.h')) { return $preferred }
+            }
+            $found = Get-ChildItem "$vs\VC\Tools\MSVC\*\atlmfc\include\atlbase.h" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if ($found) { return (Split-Path (Split-Path $found.FullName -Parent) -Parent) }
+            return $null
+          }
+
+          $atlRoot = Find-AtlRoot
+          if (-not $atlRoot) {
+            Write-Host 'ATL is not installed, adding the component.'
+            $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList `
+              'modify', '--installPath', "`"$vs`"", `
+              '--add', 'Microsoft.VisualStudio.Component.VC.ATL', `
+              '--quiet', '--norestart', '--nocache'
+            if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
+              Write-Error "vs_installer failed with $($p.ExitCode)"; exit 1
+            }
+            $atlRoot = Find-AtlRoot
+          }
+          if (-not $atlRoot) { Write-Error 'atlbase.h still not found'; exit 1 }
+
+          Write-Host "ATL root: $atlRoot"
+
+          # Compiler finds ATL headers via /I, linker finds atls.lib via LibraryPath - link both.
+          $legacy = Join-Path $vs 'VC\atlmfc'
+          $toolset = Join-Path $env:VCToolsInstallDir 'atlmfc'
+          foreach ($link in @($legacy, $toolset)) {
+            if (Test-Path $link) {
+              Write-Host "$link already exists"
+            } else {
+              New-Item -ItemType Junction -Path $link -Target $atlRoot | Out-Null
+              Write-Host "Linked $link -> $atlRoot"
+            }
+          }
+
+          # Verify reachability; a green step with ATL still missing cost two runs.
+          foreach ($probe in @(
+            (Join-Path $legacy 'include\atlbase.h'),
+            (Join-Path $legacy 'include\atlcomcli.h'),
+            (Join-Path $toolset 'lib\x64\atls.lib'))) {
+            if (-not (Test-Path $probe)) { Write-Error "unreachable: $probe"; exit 1 }
+            Write-Host "found $probe"
+          }
+
+      # actions/cache saves only on success; split restore/save to bank library progress on failure.
+      - name: ThirdParty cache.
+        id: cache-third-party
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ matrix.arch }}-third-party-${{ env.CACHE_KEY }}-${{ github.run_id }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-third-party-
+
+      - name: Libraries cache.
+        id: cache-libs
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-
+
+      - name: Qt cache.
+        id: cache-qt
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-
+
+      # A restored cache that lost an artifact still reads as built; drop its key to refetch.
+      - name: Heal stale cache keys.
+        shell: bash
+        run: |
+          [ -d "$LibrariesPath" ] || exit 0
+          if [ ! -f "$LibrariesPath/yy_thunks/objs/$MODULES_ARCH/YY_Thunks_for_Win7.obj" ]; then
+            rm -f "$LibrariesPath"/cache_keys/yy_thunks*
+            echo "yy_thunks object missing, dropped its cache key"
+          fi
+
+      - name: Libraries.
+        # No skip-release: a Release build needs Release libraries. Step timeout < job limit so cache saves still run.
+        timeout-minutes: 285
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent %QT_OPTION% win7
+
+      - name: Free up some disk space.
+        if: always()
+        shell: bash
+        run: |
+          [ -d "$LibrariesPath" ] || { echo "nothing to clean up"; exit 0; }
+          find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/qt6windows7/*' -o -path '*/yy_thunks/*' ')' -type f ')' -o -empty ')' -delete || true
+
+      - name: Save ThirdParty cache.
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ matrix.arch }}-third-party-${{ env.CACHE_KEY }}-${{ github.run_id }}
+
+      - name: Save libraries cache.
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+
+      - name: Save Qt cache.
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+
+      # cmake_helpers sets a bare /MP (one cl per core); /MP2 + --parallel 2 fit the 18.9 GB limit.
+      # Cache the build tree so re-runs skip the ~2h compile (MSBuild incremental).
+      - name: Build tree cache.
+        if: env.ONLY_CACHE == 'false'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
+          key: ${{ runner.OS }}-${{ matrix.arch }}-out-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-out-rel-${{ env.CACHE_KEY }}-
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        env:
+          # Debug info made single files blow the memory limit; off, two compilers fit.
+          _CL_: /MP2
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          rem Re-running cmake rewrites the .vcxproj files, and the fresh
+          rem timestamps make MSBuild rebuild everything - which throws away the
+          rem restored build tree. Reuse the tree when it was configured with the
+          rem same flags, and record them so a changed flag still reconfigures.
+          set "CFG_FLAGS=qt=%QT_OPTION% lto=%LTO_FLAG% target=%BUILD_TARGET% win7=on nodebug=1"
+          set "CFG_MARKER=..\out\.ci_configure_flags"
+          set "REUSE_TREE=0"
+          if exist ..\out\CMakeCache.txt if exist "%CFG_MARKER%" (
+            for /f "usebackq delims=" %%a in ("%CFG_MARKER%") do (
+              if "%%a"=="%CFG_FLAGS%" set "REUSE_TREE=1"
+            )
+          )
+          if "%REUSE_TREE%"=="1" (
+            echo Reusing the configured build tree.
+            goto :build
+          )
+          echo Configuring the build tree.
+
+          call configure.bat ^
+          %QT_OPTION% ^
+          -D CMAKE_CONFIGURATION_TYPES=Release ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
+          -D DESKTOP_APP_WIN7_COMPAT=ON ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          %LTO_FLAG% || exit /b 1
+
+          > "%CFG_MARKER%" echo %CFG_FLAGS%
+
+          :build
+          cmake --build ..\out --config Release --target Telegram --parallel 2 || exit /b 1
+
+      - name: Save build tree cache.
+        if: always() && env.ONLY_CACHE == 'false'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
+          key: ${{ runner.OS }}-${{ matrix.arch }}-out-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+
+      - name: Set up the code signing certificate.
+        if: env.ONLY_CACHE == 'false'
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String("${{ secrets.WIN_CODESIGN_PFX }}"))
+          echo "CODESIGN_PFX=$pfx" >> $env:GITHUB_ENV
+
+          $tool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $tool) { Write-Error 'signtool.exe not found'; exit 1 }
+          echo "SIGNTOOL=$($tool.FullName)" >> $env:GITHUB_ENV
+          echo "Using $($tool.FullName)"
+
+      - name: Sign the binaries.
+        if: env.ONLY_CACHE == 'false'
+        shell: pwsh
+        env:
+          CODESIGN_PASSWORD: ${{ secrets.WIN_CODESIGN_PASSWORD }}
+        run: |
+          $release = "$env:TBUILD\$env:REPO_NAME\out\Release"
+          # Guard explicitly: an empty target list would make this step pass silently.
+          if (-not (Test-Path (Join-Path $release 'Telegram.exe'))) {
+            Write-Error "Telegram.exe is missing from $release"; exit 1
+          }
+          $targets = @('Telegram.exe', 'Updater.exe') |
+            ForEach-Object { Join-Path $release $_ } | Where-Object { Test-Path $_ }
+
+          foreach ($target in $targets) {
+            # Timestamping is what keeps a signature valid past certificate expiry.
+            & $env:SIGNTOOL sign /f $env:CODESIGN_PFX /p $env:CODESIGN_PASSWORD `
+              /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $target
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Timestamping failed for $target, signing without a timestamp."
+              & $env:SIGNTOOL sign /f $env:CODESIGN_PFX /p $env:CODESIGN_PASSWORD /fd SHA256 $target
+              if ($LASTEXITCODE -ne 0) { exit 1 }
+            }
+          }
+          # Not verify /pa: a self-signed cert has no trusted chain; just check the signature is intact.
+          foreach ($target in $targets) {
+            $sig = Get-AuthenticodeSignature $target
+            $name = [IO.Path]::GetFileName($target)
+            if (-not $sig.SignerCertificate) { Write-Error "$name carries no signature"; exit 1 }
+            if ($sig.Status -in @('NotSigned', 'HashMismatch')) {
+              Write-Error "$name signature is broken: $($sig.Status)"; exit 1
+            }
+            Write-Host "$name -> $($sig.Status), signed by $($sig.SignerCertificate.Subject)"
+          }
+
+      - name: Pack the update file.
+        if: env.ONLY_CACHE == 'false'
+        shell: pwsh
+        run: |
+          $release = "$env:TBUILD\$env:REPO_NAME\out\Release"
+          Set-Location $release
+
+          # Not $args: that is an automatic variable in PowerShell.
+          $packerArgs = @('-version', $env:AppVersion, '-path', 'Telegram.exe', '-path', 'Updater.exe')
+          $d3d = "modules\${env:MODULES_ARCH}\d3d\d3dcompiler_47.dll"
+          if (Test-Path $d3d) { $packerArgs += @('-path', $d3d) }
+          $packerArgs += @('-target', $env:BUILD_TARGET)
+
+          & .\Packer.exe @packerArgs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          $update = "${env:UPD_PREFIX}${env:AppVersion}"
+          if (-not (Test-Path $update)) { Write-Error "$update was not produced"; exit 1 }
+          echo "Produced $update ($((Get-Item $update).Length) bytes)"
+
+      - name: Create the installer.
+        if: env.ONLY_CACHE == 'false'
+        shell: pwsh
+        env:
+          CODESIGN_PASSWORD: ${{ secrets.WIN_CODESIGN_PASSWORD }}
+        run: |
+          choco install innosetup -y --no-progress
+          $release = "$env:TBUILD\$env:REPO_NAME\out\Release"
+          $iss = "$env:TBUILD\$env:REPO_NAME\Telegram\build\setup.iss"
+
+          $iscc = Get-ChildItem 'C:\Program Files*\Inno Setup*\ISCC.exe' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $iscc) { Write-Error 'ISCC.exe not found'; exit 1 }
+          echo "Using $($iscc.FullName)"
+
+          & $iscc.FullName `
+            "/dMyAppVersion=$env:AppVersionStrSmall" `
+            "/dMyAppVersionZero=$env:AppVersionStr" `
+            "/dMyAppVersionFull=$env:AppVersionStrFull" `
+            "/dReleasePath=$release" `
+            "/dMyBuildTarget=${env:ISS_TARGET}" `
+            $iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          $setup = Join-Path $release "${env:SETUP_PREFIX}.${env:AppVersionStrFull}.exe"
+          if (-not (Test-Path $setup)) { Write-Error "$setup was not produced"; exit 1 }
+          & $env:SIGNTOOL sign /f $env:CODESIGN_PFX /p $env:CODESIGN_PASSWORD /fd SHA256 $setup
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Collect the artifacts.
+        if: env.ONLY_CACHE == 'false'
+        shell: pwsh
+        run: |
+          $release = "$env:TBUILD\$env:REPO_NAME\out\Release"
+          $deploy = Join-Path $env:GITHUB_WORKSPACE 'deploy'
+          $portableDir = Join-Path $deploy 'Telegram'
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+
+          Copy-Item (Join-Path $release 'Telegram.exe') $portableDir
+          $d3d = Join-Path $release "modules\${env:MODULES_ARCH}\d3d\d3dcompiler_47.dll"
+          if (Test-Path $d3d) {
+            $modules = Join-Path $portableDir "modules\${env:MODULES_ARCH}\d3d"
+            New-Item -ItemType Directory -Path $modules -Force | Out-Null
+            Copy-Item $d3d $modules
+          }
+
+          Set-Location $deploy
+          & 7z a -mx9 $env:ASSET_PORTABLE Telegram\
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & 7z t $env:ASSET_PORTABLE
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item -Recurse -Force $portableDir
+
+          # Installer gets the release name; the update file keeps its raw name for the Telegram job (Updater/PDB excluded).
+          $installer = Join-Path $release "${env:SETUP_PREFIX}.${env:AppVersionStrFull}.exe"
+          if (-not (Test-Path $installer)) { Write-Error "missing installer: $installer"; exit 1 }
+          Copy-Item $installer (Join-Path $deploy $env:ASSET_INSTALLER)
+
+          $update = Join-Path $release "${env:UPD_PREFIX}${env:AppVersion}"
+          if (-not (Test-Path $update)) { Write-Error "missing update file: $update"; exit 1 }
+          Copy-Item $update $deploy
+
+          Get-ChildItem $deploy | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        name: Upload the artifacts.
+        if: env.ONLY_CACHE == 'false'
+        with:
+          name: Telegram ${{ matrix.arch }} Release ${{ env.AppVersionStrFull }}
+          path: deploy\
+
+      - name: Publish the release.
+        if: env.ONLY_CACHE == 'false' && env.PUBLISH_RELEASE == 'true'
+        shell: bash
+        env:
+          # RELEASE_TOKEN (repo scope) overrides the workflow token if release creation is ever refused.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          set -e
+          # Checkout is in a subdir, so name the repo explicitly for gh.
+          R="$GITHUB_REPOSITORY"
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"   # tag push: the tag already points at the commit
+            TARGET=()
+          else
+            TAG="v$AppVersionStrFull"        # manual run: create the tag off dev, as the fork does
+            TARGET=(--target dev)
+          fi
+
+          # Create only if missing, else just add assets, so the arch legs and the mac workflow share one release.
+          if ! gh release view "$TAG" -R "$R" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$R" "${TARGET[@]}" \
+              --title "Forkgram $TAG" \
+              --notes "Forkgram $TAG" >/dev/null 2>&1 \
+              || gh release view "$TAG" -R "$R" >/dev/null
+          fi
+
+          # --clobber refreshes same-named assets only, never the others.
+          gh release upload "$TAG" \
+            "deploy/$ASSET_INSTALLER" \
+            "deploy/$ASSET_PORTABLE" \
+            -R "$R" --clobber
+
+  # Auto-update for everyone: publish only on a tag or explicit choice, in its own job.
+  # Holds the TG_* secrets in a 'telegram-publish' environment; merges all platforms into one feed message.
+  publish-telegram:
+    name: Publish update files to Telegram
+    needs: windows-release
+    runs-on: ubuntu-latest
+    if: >-
+      needs.windows-release.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/') ||
+       (github.event_name == 'workflow_dispatch' && inputs.telegram != 'off'))
+    environment: telegram-publish
+    steps:
+      - name: Clone the uploader script.
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts/publish_telegram.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download build artifacts.
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Telethon.
+        run: pip install telethon
+
+      - name: Publish.
+        env:
+          # api_id/api_hash aren't secret here (the session is) - Telegram's public open credentials.
+          TG_API_ID: "611335"
+          TG_API_HASH: "d524b414d21f4d37f08684c1df41ac9c"
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          TG_FEED_CHANNEL: ${{ secrets.TG_FEED_CHANNEL }}
+          TG_FILES_CHANNEL: ${{ secrets.TG_FILES_CHANNEL }}
+          ARTIFACTS_DIR: artifacts
+          # 'scheduled' sends for real but 360 days out - an invisible smoke test; delete those after.
+          TG_SCHEDULE_DAYS: ${{ (github.event_name == 'workflow_dispatch' && inputs.telegram == 'scheduled') && '360' || '0' }}
+          TG_ENTRY_KEY: ${{ (github.event_name == 'workflow_dispatch' && inputs.telegram == 'testing') && 'testing' || 'released' }}
+        run: python .github/scripts/publish_telegram.py

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/connection_box.h"
 
 #include "base/call_delayed.h"
+#include "base/options.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/facade.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/proxy_check.h"
+#include "mtproto/websocket_relays.h"
 #include "qr/qr_generate.h"
 #include "settings/settings_common.h"
 #include "storage/localstorage.h"
@@ -630,6 +632,9 @@ private:
 	not_null<ProxiesBoxController*> _controller;
 	Core::SettingsProxy &_settings;
 	QPointer<Ui::Checkbox> _tryIPv6;
+	QPointer<Ui::Checkbox> _webSocket;
+	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _webSocketOptions;
+	QPointer<HostInput> _webSocketDomain;
 	std::shared_ptr<Ui::RadioenumGroup<ProxyData::Settings>> _proxySettings;
 	QPointer<Ui::SlideWrap<Ui::Checkbox>> _proxyForCalls;
 	QPointer<Ui::SlideWrap<Ui::Checkbox>> _proxyRotation;
@@ -1113,6 +1118,42 @@ void ProxiesBox::setupContent() {
 			tr::lng_connection_try_ipv6(tr::now),
 			_settings.tryIPv6()),
 		st::proxyTryIPv6Padding);
+	_webSocket = inner->add(
+		object_ptr<Ui::Checkbox>(
+			inner,
+			tr::lng_proxy_websocket(tr::now),
+			base::options::value<bool>(MTP::kOptionWebSocketTransport)),
+		st::proxyTryIPv6Padding);
+	_webSocketOptions = inner->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inner,
+			object_ptr<Ui::VerticalLayout>(inner)));
+	const auto webSocketInner = _webSocketOptions->entity();
+	const auto domainRow = webSocketInner->add(
+		object_ptr<Ui::FixedHeightWidget>(
+			webSocketInner,
+			st::connectionHostInputField.heightMin),
+		st::proxyEditInputPadding);
+	_webSocketDomain = Ui::CreateChild<HostInput>(
+		domainRow,
+		st::connectionHostInputField,
+		tr::lng_proxy_websocket_domain(),
+		base::options::value<QString>(MTP::kOptionWebSocketDomain));
+	domainRow->widthValue(
+	) | rpl::on_next([=](int width) {
+		_webSocketDomain->resize(width, _webSocketDomain->height());
+		_webSocketDomain->moveToLeft(0, 0);
+	}, domainRow->lifetime());
+	webSocketInner->add(
+		object_ptr<Ui::FlatLabel>(
+			webSocketInner,
+			tr::lng_proxy_websocket_about(tr::now),
+			st::boxDividerLabel),
+		st::proxyAboutPadding);
+	_webSocketOptions->toggle(
+		base::options::value<bool>(MTP::kOptionWebSocketTransport),
+		anim::type::instant);
+
 	_proxySettings
 		= std::make_shared<Ui::RadioenumGroup<ProxyData::Settings>>(
 			_settings.settings());
@@ -1223,6 +1264,25 @@ void ProxiesBox::setupContent() {
 	) | rpl::on_next([=](bool checked) {
 		_controller->setTryIPv6(checked);
 	}, _tryIPv6->lifetime());
+
+	const auto applyWebSocketDomain = [=] {
+		_controller->setWebSocketDomain(
+			_webSocketDomain->getLastText().trimmed());
+	};
+	_webSocket->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		_webSocketOptions->toggle(checked, anim::type::normal);
+		_controller->setWebSocketTransport(checked);
+	}, _webSocket->lifetime());
+
+	connect(
+		_webSocketDomain.data(),
+		&Ui::MaskedInputField::blurred,
+		applyWebSocketDomain);
+	connect(
+		_webSocketDomain.data(),
+		&Ui::MaskedInputField::submitted,
+		applyWebSocketDomain);
 
 	_controller->proxySettingsValue(
 	) | rpl::on_next([=](ProxyData::Settings value) {
@@ -2336,6 +2396,32 @@ void ProxiesBoxController::setTryIPv6(bool enabled) {
 	_account->mtp().restart();
 	_settings.connectionTypeChangesNotify();
 	saveDelayed();
+}
+
+void ProxiesBoxController::setWebSocketTransport(bool enabled) {
+	auto &option = base::options::lookup<bool>(
+		MTP::kOptionWebSocketTransport);
+	if (option.value() == enabled) {
+		return;
+	}
+	option.set(enabled);
+	Core::App().refreshGlobalProxy();
+	_account->mtp().restart();
+	_settings.connectionTypeChangesNotify();
+}
+
+void ProxiesBoxController::setWebSocketDomain(const QString &domain) {
+	auto &option = base::options::lookup<QString>(
+		MTP::kOptionWebSocketDomain);
+	if (option.value() == domain) {
+		return;
+	}
+	option.set(domain);
+	Core::App().refreshGlobalProxy();
+	if (base::options::value<bool>(MTP::kOptionWebSocketTransport)) {
+		_account->mtp().restart();
+		_settings.connectionTypeChangesNotify();
+	}
 }
 
 void ProxiesBoxController::saveDelayed() {

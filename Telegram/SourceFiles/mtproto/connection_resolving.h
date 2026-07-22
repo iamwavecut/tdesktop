@@ -33,7 +33,8 @@ public:
 		int port,
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId,
-		bool protocolForFiles) override;
+		bool protocolForFiles,
+		const QString &webSocketPath) override;
 	bool isConnected() const override;
 
 	int32 debugState() const override;
@@ -64,6 +65,7 @@ private:
 	bytes::vector _protocolSecret;
 	int16 _protocolDcId = 0;
 	bool _protocolForFiles = false;
+	QString _webSocketPath;
 	base::Timer _timeoutTimer;
 
 };

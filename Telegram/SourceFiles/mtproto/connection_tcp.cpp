@@ -508,7 +508,8 @@ void TcpConnection::connectToServer(
 		int port,
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId,
-		bool protocolForFiles) {
+		bool protocolForFiles,
+		const QString &webSocketPath) {
 	Expects(_address.isEmpty());
 	Expects(_port == 0);
 	Expects(_protocol == nullptr);
@@ -530,7 +531,8 @@ void TcpConnection::connectToServer(
 		thread(),
 		secret,
 		ToNetworkProxy(_proxy),
-		protocolForFiles);
+		protocolForFiles,
+		webSocketPath);
 	_protocolDcId = protocolDcId;
 
 	const auto postfix = _socket->debugPostfix();
@@ -622,6 +624,12 @@ void TcpConnection::socketPacket(bytes::const_span bytes) {
 void TcpConnection::timedOut() {
 	if (_socket) {
 		_socket->timedOut();
+	}
+}
+
+void TcpConnection::verifiedDataReceived() {
+	if (_socket) {
+		_socket->verifiedDataReceived();
 	}
 }
 

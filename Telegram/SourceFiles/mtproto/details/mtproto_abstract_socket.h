@@ -18,7 +18,8 @@ public:
 		not_null<QThread*> thread,
 		const bytes::vector &secret,
 		const QNetworkProxy &proxy,
-		bool protocolForFiles);
+		bool protocolForFiles,
+		const QString &webSocketPath = QString());
 
 	void setDebugId(const QString &id) {
 		_debugId = id;
@@ -48,6 +49,8 @@ public:
 	virtual void connectToHost(const QString &address, int port) = 0;
 	[[nodiscard]] virtual bool isGoodStartNonce(bytes::const_span nonce) = 0;
 	virtual void timedOut() = 0;
+	virtual void verifiedDataReceived() {
+	}
 	[[nodiscard]] virtual bool isConnected() = 0;
 	[[nodiscard]] virtual bool hasBytesAvailable() = 0;
 	[[nodiscard]] virtual int64 read(bytes::span buffer) = 0;

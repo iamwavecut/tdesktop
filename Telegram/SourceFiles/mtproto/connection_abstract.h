@@ -86,8 +86,11 @@ public:
 		int port,
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId,
-		bool protocolForFiles) = 0;
+		bool protocolForFiles,
+		const QString &webSocketPath = QString()) = 0;
 	virtual void timedOut() {
+	}
+	virtual void verifiedDataReceived() {
 	}
 	[[nodiscard]] virtual bool isConnected() const = 0;
 	[[nodiscard]] virtual bool usingHttpWait() {

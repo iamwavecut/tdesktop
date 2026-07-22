@@ -78,7 +78,8 @@ void ResolvingConnection::setChild(ConnectionPointer &&child) {
 			_port,
 			_protocolSecret,
 			_protocolDcId,
-			_protocolForFiles);
+			_protocolForFiles,
+			_webSocketPath);
 		CONNECTION_LOG_INFO("Resolving connected a new child: "
 			+ _child->debugId());
 	}
@@ -210,7 +211,8 @@ void ResolvingConnection::connectToServer(
 		int port,
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId,
-		bool protocolForFiles) {
+		bool protocolForFiles,
+		const QString &webSocketPath) {
 	if (!_child) {
 		InvokeQueued(this, [=] { emitError(kErrorCodeOther); });
 		return;
@@ -220,12 +222,14 @@ void ResolvingConnection::connectToServer(
 	_protocolSecret = protocolSecret;
 	_protocolDcId = protocolDcId;
 	_protocolForFiles = protocolForFiles;
+	_webSocketPath = webSocketPath;
 	_child->connectToServer(
 		address,
 		port,
 		protocolSecret,
 		protocolDcId,
-		protocolForFiles);
+		protocolForFiles,
+		webSocketPath);
 	CONNECTION_LOG_INFO("Resolving connected a child: " + _child->debugId());
 }
 

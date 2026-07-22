@@ -33,8 +33,10 @@ public:
 		int port,
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId,
-		bool protocolForFiles) override;
+		bool protocolForFiles,
+		const QString &webSocketPath) override;
 	void timedOut() override;
+	void verifiedDataReceived() override;
 	bool isConnected() const override;
 
 	int32 debugState() const override;

@@ -88,6 +88,8 @@ public:
 	void setProxyRotationEnabled(bool enabled);
 	void setProxyRotationTimeout(int value);
 	void setTryIPv6(bool enabled);
+	void setWebSocketTransport(bool enabled);
+	void setWebSocketDomain(const QString &domain);
 	rpl::producer<ProxyData::Settings> proxySettingsValue() const;
 
 	[[nodiscard]] bool contains(const ProxyData &proxy) const;
