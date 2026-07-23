@@ -1,0 +1,87 @@
+name: Publish to the public channel.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to take the asset from (empty = latest release).'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Download and print the caption, but upload nothing.'
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: ["Windows Release."]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-channel
+  cancel-in-progress: false
+
+jobs:
+
+  publish-channel:
+    name: Upload the portable build to the channel
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    environment: telegram-publish
+
+    steps:
+      - name: Clone the uploader script.
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts/publish_channel.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download the asset.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_NAME: Telegram.zip
+          TAG_INPUT: ${{ inputs.tag }}
+          TAG_BUILT: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -e
+          TAG="${TAG_INPUT:-$TAG_BUILT}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          fi
+
+          # The caption links the tag as an upstream version, so refuse anything
+          # that is not a plain vX.Y.Z rather than posting a broken link.
+          if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "Not a version tag: $TAG" >&2
+            exit 1
+          fi
+
+          mkdir -p deploy
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" \
+            -p "$ASSET_NAME" -D deploy
+          ls -l "deploy/$ASSET_NAME"
+
+          echo "ASSET_PATH=deploy/$ASSET_NAME" >> "$GITHUB_ENV"
+          echo "ASSET_VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Telethon.
+        run: pip install telethon
+
+      - name: Publish.
+        env:
+          TG_API_ID: "611335"
+          TG_API_HASH: "d524b414d21f4d37f08684c1df41ac9c"
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          TG_PUBLIC_CHANNEL: ${{ secrets.TG_PUBLIC_CHANNEL }}
+          TG_SCHEDULE_DAYS: "350"
+          TG_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: python .github/scripts/publish_channel.py

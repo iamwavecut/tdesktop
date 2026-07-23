@@ -41,6 +41,7 @@ NAME_TO_PLATFORM = [
     (re.compile(r"^tx64upd(\d+)$"), "win64"),
     (re.compile(r"^tarm64upd(\d+)$"), "winarm64"),
     (re.compile(r"^tupdate(\d+)$"), "win"),
+    (re.compile(r"^tlinuxupd(\d+)$"), "linux"),
 ]
 
 
@@ -139,7 +140,7 @@ async def main():
                 msg = await client.send_file(
                     files, path,
                     force_document=True,
-                    caption=f"{os.path.basename(path)} ({platform})",
+                    caption='',
                     schedule=when)
                 entry = f"{version}:{FILES}#{msg.id}"
                 print(f"uploaded {platform}: {entry}")

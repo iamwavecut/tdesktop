@@ -202,7 +202,8 @@ jobs:
           def literal(name, pem, static=False):
               lines = [l.strip() for l in pem.strip().splitlines() if l.strip()]
               body = ''.join(l + '\\n\\\n' for l in lines[:-1]) + lines[-1] + '\\\n'
-              return '%sconst char *%s = "\\\n%s";\n' % ('static ' if static else '', name, body)
+              prefix = '[[maybe_unused]] static ' if static else ''
+              return '%sconst char *%s = "\\\n%s";\n' % (prefix, name, body)
 
           # configure.py only regex-scans this one for the API credentials.
           (private / 'custom_api_id.h').write_text(
@@ -216,7 +217,7 @@ jobs:
               + '\n'
               + literal('PrivateBetaKey', os.environ['PACKER_BETA_KEY']))
 
-          # config.h defines this one static in its fallback branch, so match that.
+          # packer.cpp's only use of this is commented out, and -Werror rejects an unused static.
           (private / 'alpha_private.h').write_text(
               literal('AlphaPrivateKey', os.environ['ALPHA_KEY'], static=True))
           PY
@@ -621,6 +622,11 @@ jobs:
       (startsWith(github.ref, 'refs/tags/') ||
        (github.event_name == 'workflow_dispatch' && inputs.telegram != 'off'))
     environment: telegram-publish
+    # The feed message is rewritten read-modify-write; the shared group name
+    # serialises this with the Linux workflow so neither loses its entry.
+    concurrency:
+      group: telegram-feed
+      cancel-in-progress: false
     steps:
       - name: Clone the uploader script.
         uses: actions/checkout@v7
