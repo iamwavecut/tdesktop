@@ -13,9 +13,9 @@ MONTHS = [
 ]
 
 VERSION_RE = re.compile(
-    r"^(\d+\.\d+(?:\.\d+)?)\s*"        # version number
-    r"(?:(alpha|beta|dev|stable)\s*)?"   # optional tag
-    r"\((\d{2})\.(\d{2})\.(\d{2,4})\)$" # date (DD.MM.YY or DD.MM.YYYY)
+    r"^(\d+\.\d+(?:\.\d+)?)\s*"
+    r"(?:(alpha|beta|dev|stable)\s*)?"
+    r"\((\d{2})\.(\d{2})\.(\d{2,4})\)$"
 )
 
 
@@ -53,7 +53,6 @@ def parse_changelog(text: str) -> list[dict]:
                 "lines": [],
             }
         elif current is not None:
-            # Skip blank lines at the start
             if not line and not current["lines"]:
                 continue
             # Skip stray artifact lines
@@ -64,7 +63,6 @@ def parse_changelog(text: str) -> list[dict]:
     if current:
         entries.append(current)
 
-    # Trim trailing blank lines from each entry
     for entry in entries:
         while entry["lines"] and not entry["lines"][-1]:
             entry["lines"].pop()
@@ -93,7 +91,6 @@ def render_entry(entry: dict) -> str:
     for line in entry["lines"]:
         stripped = line.lstrip()
         if stripped.startswith("- ") or stripped.startswith("\u2014 "):
-            # Bullet point (- or em dash)
             if not in_list:
                 parts.append("  <ul>")
                 in_list = True
@@ -279,7 +276,6 @@ footer a:hover {{ text-decoration: underline; }}
     }}, 150);
   }});
 
-  // Anchor links: copy URL on click
   document.addEventListener('click', function(e) {{
     var anchor = e.target.closest('.anchor');
     if (!anchor) return;
@@ -314,7 +310,6 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html_content, encoding="utf-8")
 
-    # Copy favicon files from resources
     icons_src = repo / "Telegram" / "Resources" / "art"
     for name in ("icon16.png", "icon32.png"):
         icon = icons_src / name

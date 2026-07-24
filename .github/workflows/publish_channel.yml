@@ -38,7 +38,9 @@ jobs:
       - name: Clone the uploader script.
         uses: actions/checkout@v7
         with:
-          sparse-checkout: .github/scripts/publish_channel.py
+          sparse-checkout: |
+            .github/scripts/publish_channel.py
+            .github/data/logo_256_square.png
           sparse-checkout-cone-mode: false
 
       - name: Download the asset.

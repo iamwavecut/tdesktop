@@ -52,14 +52,12 @@ jobs:
     timeout-minutes: 360
 
     strategy:
-      # One arch can finish even if the other fails.
       fail-fast: false
       matrix:
         arch: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.arch != 'both') && format('["{0}"]', inputs.arch) || '["x64","x86"]') }}
 
     env:
       PREPARE_PATH: "Telegram/build/prepare/prepare.py"
-      # Everything the two architectures name differently.
       BUILD_TARGET: ${{ matrix.arch == 'x64' && 'win64' || 'win' }}
       MSVC_ARCH: ${{ matrix.arch == 'x64' && 'x64' || 'x64_x86' }}
       LIBS_SUBDIR: ${{ matrix.arch == 'x64' && '\win64' || '' }}
@@ -70,7 +68,6 @@ jobs:
       # Release asset names as the fork labels them (x86 = x32).
       ASSET_INSTALLER: ${{ matrix.arch == 'x64' && 'Telegram.Windows.x64.Installer.exe' || 'Telegram.Windows.x32.Installer.exe' }}
       ASSET_PORTABLE: ${{ matrix.arch == 'x64' && 'Telegram.zip' || 'Telegram_x86.zip' }}
-      # A scheduled run only warms caches - never builds Telegram or publishes.
       ONLY_CACHE: ${{ (github.event_name == 'schedule' || inputs.only_cache) && 'true' || 'false' }}
       ENABLE_LTO: ${{ inputs.lto && 'true' || 'false' }}
       # Qt 5 can't compile lib_ui's Qt 6 accessibility API, so qt6 stays on (tags included).
@@ -249,7 +246,6 @@ jobs:
           Write-Host "Visual Studio: $vs"
 
           function Find-AtlRoot {
-            # Prefer the ATL shipped with the toolset we actually compile with.
             if ($env:VCToolsInstallDir) {
               $preferred = Join-Path $env:VCToolsInstallDir 'atlmfc'
               if (Test-Path (Join-Path $preferred 'include\atlbase.h')) { return $preferred }
@@ -289,7 +285,6 @@ jobs:
             }
           }
 
-          # Verify reachability; a green step with ATL still missing cost two runs.
           foreach ($probe in @(
             (Join-Path $legacy 'include\atlbase.h'),
             (Join-Path $legacy 'include\atlcomcli.h'),
@@ -381,8 +376,6 @@ jobs:
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
           key: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
 
-      # cmake_helpers sets a bare /MP (one cl per core); /MP2 + --parallel 2 fit the 18.9 GB limit.
-      # Cache the build tree so re-runs skip the ~2h compile (MSBuild incremental).
       - name: Build tree cache.
         if: env.ONLY_CACHE == 'false'
         uses: actions/cache/restore@v6
@@ -586,14 +579,13 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           set -e
-          # Checkout is in a subdir, so name the repo explicitly for gh.
           R="$GITHUB_REPOSITORY"
 
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"   # tag push: the tag already points at the commit
+            TAG="${GITHUB_REF#refs/tags/}"
             TARGET=()
           else
-            TAG="v$AppVersionStrFull"        # manual run: create the tag off dev, as the fork does
+            TAG="v$AppVersionStrFull"
             TARGET=(--target dev)
           fi
 
@@ -605,14 +597,11 @@ jobs:
               || gh release view "$TAG" -R "$R" >/dev/null
           fi
 
-          # --clobber refreshes same-named assets only, never the others.
           gh release upload "$TAG" \
             "deploy/$ASSET_INSTALLER" \
             "deploy/$ASSET_PORTABLE" \
             -R "$R" --clobber
 
-  # Auto-update for everyone: publish only on a tag or explicit choice, in its own job.
-  # Holds the TG_* secrets in a 'telegram-publish' environment; merges all platforms into one feed message.
   publish-telegram:
     name: Publish update files to Telegram
     needs: windows-release
@@ -631,7 +620,9 @@ jobs:
       - name: Clone the uploader script.
         uses: actions/checkout@v7
         with:
-          sparse-checkout: .github/scripts/publish_telegram.py
+          sparse-checkout: |
+            .github/scripts/publish_telegram.py
+            .github/data/logo_256_square.png
           sparse-checkout-cone-mode: false
 
       - name: Download build artifacts.

@@ -18,6 +18,9 @@ VERSION = os.environ["ASSET_VERSION"]
 DRY_RUN = os.environ.get("TG_DRY_RUN", "") == "1"
 SCHEDULE_DAYS = int(os.environ.get("TG_SCHEDULE_DAYS", "350") or "350")
 SEARCH_LIMIT = int(os.environ.get("TG_SEARCH_LIMIT", "200") or "200")
+THUMB = os.environ.get("TG_THUMB") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "data",
+    "logo_256_square.png")
 
 CAPTION = ("— Updated version to "
            "[{version}](https://github.com/telegramdesktop/tdesktop/releases/tag/v{version}).")
@@ -49,6 +52,8 @@ async def warn_if_unsent(client, channel, name):
 async def main():
     if not os.path.isfile(ASSET_PATH):
         sys.exit(f"No asset at {ASSET_PATH!r}.")
+    if not os.path.isfile(THUMB):
+        sys.exit(f"No thumbnail at {THUMB!r} (forgot to sparse-checkout it?).")
 
     asset_name = os.path.basename(ASSET_PATH)
     caption = CAPTION.format(version=VERSION)
@@ -91,6 +96,7 @@ async def main():
             force_document=True,
             caption=caption,
             parse_mode="md",
+            thumb=THUMB,
             reply_to=previous.id,
             schedule=when)
         print(f"\nscheduled message #{msg.id} in {CHANNEL} for {when:%Y-%m-%d} "

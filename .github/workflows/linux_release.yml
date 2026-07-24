@@ -125,7 +125,6 @@ jobs:
           printf '%s\n' "$DOCKERFILE" > Dockerfile
           rm -rf __pycache__
 
-          # An empty render still looks like a valid context; buildx would only fail much later.
           if [ "$(grep -c '^FROM' Dockerfile)" -lt 1 ]; then
             echo "Generated Dockerfile has no FROM instruction:"
             head -20 Dockerfile
@@ -253,10 +252,10 @@ jobs:
           R="$GITHUB_REPOSITORY"
 
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"   # tag push: the tag already points at the commit
+            TAG="${GITHUB_REF#refs/tags/}"
             TARGET=()
           else
-            TAG="v$AppVersionStrFull"        # manual run: create the tag off dev, as the fork does
+            TAG="v$AppVersionStrFull"
             TARGET=(--target dev)
           fi
 
@@ -288,7 +287,9 @@ jobs:
       - name: Clone the uploader script.
         uses: actions/checkout@v7
         with:
-          sparse-checkout: .github/scripts/publish_telegram.py
+          sparse-checkout: |
+            .github/scripts/publish_telegram.py
+            .github/data/logo_256_square.png
           sparse-checkout-cone-mode: false
 
       # Filtered: unfiltered this also pulls build-push-action's .dockerbuild

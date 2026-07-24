@@ -8,14 +8,6 @@ downloads the referenced document. So: upload each update file to the files
 channel, then post one feed message pointing at the uploads. That message must
 carry every platform at once, so new entries are merged onto the previous feed
 JSON rather than replacing it.
-
-Env: TG_API_ID, TG_API_HASH, TG_SESSION (uploader account, secrets);
-TG_FEED_CHANNEL, TG_FILES_CHANNEL, ARTIFACTS_DIR;
-TG_ENTRY_KEY "released"/"testing"; TG_DRY_RUN "1"; TG_SCHEDULE_DAYS N (post N days
-ahead into the Scheduled queue - an invisible smoke test); TG_FEED_MAX_AGE_DAYS D
-(edit the latest feed message instead of posting a new one when it is <= D days
-old and already carries this version, so one message covers all platforms;
-default 2).
 """
 import os
 import re
@@ -35,6 +27,9 @@ ENTRY_KEY = os.environ.get("TG_ENTRY_KEY", "released")
 DRY_RUN = os.environ.get("TG_DRY_RUN", "") == "1"
 SCHEDULE_DAYS = int(os.environ.get("TG_SCHEDULE_DAYS", "0") or "0")
 MAX_AGE_DAYS = int(os.environ.get("TG_FEED_MAX_AGE_DAYS", "2") or "2")
+THUMB = os.environ.get("TG_THUMB") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "data",
+    "logo_256_square.png")
 
 # Update file name -> platform key the client matches against Platform::AutoUpdateKey().
 NAME_TO_PLATFORM = [
@@ -57,7 +52,6 @@ def find_update_files(root):
             if not m:
                 continue
             if platform in result:
-                # Duplicate artifacts for one platform - refuse to guess.
                 sys.exit(f"Two update files map to {platform}: "
                          f"{result[platform][1]} and {path}")
             result[platform] = (int(m.group(1)), path)
@@ -96,6 +90,8 @@ async def main():
     updates = find_update_files(ARTIFACTS_DIR)
     if not updates:
         sys.exit(f"No update files found under {ARTIFACTS_DIR!r}.")
+    if not os.path.isfile(THUMB):
+        sys.exit(f"No thumbnail at {THUMB!r} (forgot to sparse-checkout it?).")
 
     print("Update files to publish:")
     for platform, (version, path) in sorted(updates.items()):
@@ -141,6 +137,7 @@ async def main():
                     files, path,
                     force_document=True,
                     caption='',
+                    thumb=THUMB,
                     schedule=when)
                 entry = f"{version}:{FILES}#{msg.id}"
                 print(f"uploaded {platform}: {entry}")
