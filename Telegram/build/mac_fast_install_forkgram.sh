@@ -10,7 +10,7 @@ Builds Forkgram Release and fast-installs it into an already packaged
 
 Options:
   --skip-build       Install the current out/Release executable without building.
-  --copy-resources   Also copy out/Release/Forkgram.app/Contents/Resources.
+  --copy-resources   Also copy Resources and Info.plist from out/Release.
   --deep-sign        Run a full codesign --deep pass and deep verification.
   --app PATH         Installed app path. Default: /Applications/Forkgram.app.
   --source PATH      Source app path. Default: out/Release/Forkgram.app.
@@ -114,6 +114,8 @@ source_app="$(cd "$(dirname "$source_app")" && pwd)/$(basename "$source_app")"
 installed_app="$(cd "$(dirname "$installed_app")" && pwd)/$(basename "$installed_app")"
 source_binary="$source_app/Contents/MacOS/Forkgram"
 installed_binary="$installed_app/Contents/MacOS/Forkgram"
+source_info="$source_app/Contents/Info.plist"
+installed_info="$installed_app/Contents/Info.plist"
 
 [[ -x "$source_binary" ]] || Error "source executable not found: $source_binary"
 [[ -d "$installed_app/Contents/Frameworks" ]] || Error "$installed_app is not a packaged app; run the full macOS packaging/install flow first"
@@ -128,7 +130,9 @@ RewriteExecutableDeps "$installed_app" "$installed_binary"
 
 if [[ "$copy_resources" == 1 ]]; then
   [[ -d "$source_app/Contents/Resources" ]] || Error "source resources not found: $source_app/Contents/Resources"
+  [[ -f "$source_info" ]] || Error "source Info.plist not found: $source_info"
   ditto "$source_app/Contents/Resources" "$installed_app/Contents/Resources"
+  install -m 644 "$source_info" "$installed_info"
 fi
 
 codesign --force --sign - "$installed_binary"
