@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rhi/rhi_shader.h"
 #include "ui/rp_widget.h"
 #include "ui/painter.h"
-#include "styles/style_basic.h"
 #include "base/debug_log.h"
 
 #include <rhi/qrhi.h>
@@ -544,6 +543,14 @@ void ThanosEffectRenderer::render(
 
 void ThanosEffectRenderer::addItem(ThanosItem item) {
 	_pendingItems.push_back(std::move(item));
+}
+
+void ThanosEffectRenderer::finishAll() {
+	if (!hasActiveItems()) {
+		return;
+	}
+	_pendingItems.clear();
+	_finishRequested = true;
 }
 
 bool ThanosEffectRenderer::hasActiveItems() const {

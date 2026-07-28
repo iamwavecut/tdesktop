@@ -269,7 +269,9 @@ bool PreventsQuit(Core::QuitReason reason) {
 }
 
 void ActivateThisProcess() {
-	const auto window = Core::App().activeWindow();
+	const auto window = Core::IsAppLaunched()
+		? Core::App().activeWindow()
+		: nullptr;
 	objc_activateProgram(window ? window->widget()->winId() : 0);
 }
 
