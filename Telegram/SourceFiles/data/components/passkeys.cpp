@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "mtproto/mtproto_auth_key.h"
+#include "mtproto/mtproto_response.h"
 #include "platform/platform_webauthn.h"
 
 namespace Data {
@@ -38,7 +39,8 @@ Passkeys::Passkeys(not_null<Main::Session*> session)
 Passkeys::~Passkeys() = default;
 
 void Passkeys::initRegistration(
-		Fn<void(const Data::Passkey::RegisterData&)> done) {
+		Fn<void(const Data::Passkey::RegisterData&)> done,
+		Fn<void(QString)> fail) {
 	if (_pendingRegistration
 		&& (crl::now() - _pendingRegistrationTime
 			< crl::time(_pendingRegistration->timeout))) {
@@ -55,6 +57,12 @@ void Passkeys::initRegistration(
 				= std::make_unique<Data::Passkey::RegisterData>(*p);
 			_pendingRegistrationTime = crl::now();
 			done(*p);
+		} else if (fail) {
+			fail(u"PASSKEY_OPTIONS_INVALID"_q);
+		}
+	}).fail([=](const MTP::Error &error) {
+		if (fail && !MTP::IgnoreError(error)) {
+			fail(error.type());
 		}
 	}).send();
 }
@@ -88,6 +96,7 @@ void Passkeys::deletePasskey(
 	_session->api().request(MTPaccount_DeletePasskey(
 		MTP_string(id)
 	)).done([=] {
+		Platform::WebAuthn::RemoveKeyLocalOnly(id);
 		_lastRequestTime = 0;
 		_listKnown = false;
 		loadList();
@@ -140,8 +149,14 @@ bool Passkeys::canRegister() const {
 	return Platform::WebAuthn::IsSupported() && _passkeys.size() < max;
 }
 
+bool Passkeys::canRegisterLocalOnly() const {
+	const auto max = _session->appConfig().passkeysAccountPasskeysMax();
+	return Platform::WebAuthn::LocalOnlySupported() && _passkeys.size() < max;
+}
+
 bool Passkeys::possible() const {
-	return _session->appConfig().settingsDisplayPasskeys();
+	return _session->appConfig().settingsDisplayPasskeys()
+		|| Platform::WebAuthn::LocalOnlySupported();
 }
 
 void InitPasskeyLogin(

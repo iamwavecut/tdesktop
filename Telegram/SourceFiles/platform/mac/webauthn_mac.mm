@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/platform_webauthn.h"
 
+#include "platform/mac/webauthn_local_mac.h"
+
 #if 0
 
 #include "data/data_passkey_deserialize.h"
@@ -340,22 +342,66 @@ void Login(
 
 #endif
 
+#include "webauthn/webauthn_common.h"
+
 namespace Platform::WebAuthn {
 
-
 bool IsSupported() {
-	return false;
+	return true;
 }
-
 
 void RegisterKey(
 		const Data::Passkey::RegisterData &data,
 		Fn<void(RegisterResult result)> callback) {
+	RegisterViaCable(data, std::move(callback));
 }
 
 void Login(
 		const Data::Passkey::LoginData &data,
 		Fn<void(LoginResult result)> callback) {
+	LoginViaCable(data, std::move(callback));
+}
+
+bool SecurityKeyPresent() {
+	return Libfido2DevicePresent();
+}
+
+void RegisterViaSecurityKey(
+		const Data::Passkey::RegisterData &data,
+		Fn<void(RegisterResult)> callback) {
+	RegisterViaLibfido2(data, std::move(callback));
+}
+
+void LoginViaSecurityKey(
+		const Data::Passkey::LoginData &data,
+		Fn<void(LoginResult)> callback) {
+	LoginViaLibfido2(data, std::move(callback));
+}
+
+bool LocalOnlySupported() {
+	return Local::IsSupported();
+}
+
+bool HasLocalOnlyKeys(bool testServer) {
+	return Local::HasKeys(testServer);
+}
+
+void RegisterKeyLocalOnly(
+		const Data::Passkey::RegisterData &data,
+		bool testServer,
+		Fn<void(RegisterResult result)> callback) {
+	Local::RegisterKey(data, testServer, std::move(callback));
+}
+
+void LoginLocalOnly(
+		const Data::Passkey::LoginData &data,
+		bool testServer,
+		Fn<void(LoginResult result)> callback) {
+	Local::Login(data, testServer, std::move(callback));
+}
+
+void RemoveKeyLocalOnly(const QString &credentialId) {
+	Local::RemoveKey(credentialId);
 }
 
 } // namespace Platform::WebAuthn

@@ -673,6 +673,7 @@ void BuildSecuritySection(
 		auto passkeysShown = (rpl::single(rpl::empty_value())
 			| rpl::then(session->passkeys().requestList())) | rpl::map([=] {
 			return Platform::WebAuthn::IsSupported()
+				|| Platform::WebAuthn::LocalOnlySupported()
 				|| !session->passkeys().list().empty();
 		});
 

@@ -45,6 +45,12 @@ private:
 	void sendCheckPasswordRequest();
 	void setupControls();
 	void setupPasskeyLink();
+	void updatePasskeyLinks();
+	[[nodiscard]] auto createPasskeyLink(
+		const QString &text,
+		bool localOnly,
+		bool testServer)
+	-> not_null<Ui::LinkButton*>;
 	void refreshCode();
 	void checkForTokenUpdate(const MTPUpdates &updates);
 	void checkForTokenUpdate(const MTPUpdate &update);
@@ -58,6 +64,7 @@ private:
 	rpl::event_stream<bool> _qrActive;
 	Ui::LinkButton *_skip = nullptr;
 	Ui::LinkButton *_passkey = nullptr;
+	Ui::LinkButton *_passkeyLocal = nullptr;
 	base::Timer _refreshTimer;
 	mtpRequestId _requestId = 0;
 	bool _forceRefresh = false;

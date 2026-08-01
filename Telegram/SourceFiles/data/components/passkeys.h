@@ -39,7 +39,9 @@ public:
 	explicit Passkeys(not_null<Main::Session*> session);
 	~Passkeys();
 
-	void initRegistration(Fn<void(const Data::Passkey::RegisterData&)> done);
+	void initRegistration(
+		Fn<void(const Data::Passkey::RegisterData&)> done,
+		Fn<void(QString)> fail = nullptr);
 	void registerPasskey(
 		const Platform::WebAuthn::RegisterResult &result,
 		Fn<void()> done);
@@ -51,6 +53,7 @@ public:
 	[[nodiscard]] const std::vector<PasskeyEntry> &list() const;
 	[[nodiscard]] bool listKnown() const;
 	[[nodiscard]] bool canRegister() const;
+	[[nodiscard]] bool canRegisterLocalOnly() const;
 	[[nodiscard]] bool possible() const;
 
 private:

@@ -47,4 +47,17 @@ void Login(
 	const Data::Passkey::LoginData &data,
 	Fn<void(LoginResult result)> callback);
 
+// A passkey kept by the app itself, never leaving this computer.
+[[nodiscard]] bool LocalOnlySupported();
+[[nodiscard]] bool HasLocalOnlyKeys(bool testServer);
+void RegisterKeyLocalOnly(
+	const Data::Passkey::RegisterData &data,
+	bool testServer,
+	Fn<void(RegisterResult result)> callback);
+void LoginLocalOnly(
+	const Data::Passkey::LoginData &data,
+	bool testServer,
+	Fn<void(LoginResult result)> callback);
+void RemoveKeyLocalOnly(const QString &credentialId);
+
 } // namespace Platform::WebAuthn

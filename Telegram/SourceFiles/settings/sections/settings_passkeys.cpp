@@ -10,11 +10,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "data/components/passkeys.h"
+#include "data/data_passkey_deserialize.h"
 #include "data/data_session.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_session.h"
+#include "mtproto/mtp_instance.h"
+#include "mtproto/mtproto_dc_options.h"
 #include "platform/platform_webauthn.h"
 #include "settings/cloud_password/settings_cloud_password_common.h"
 #include "settings/sections/settings_privacy_security.h"
@@ -75,6 +78,32 @@ private:
 
 };
 
+void CreateLocalOnlyPasskey(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Session*> session,
+		Fn<void()> done = nullptr) {
+	const auto testServer
+		= (session->mtp().environment() == MTP::Environment::Test);
+	session->passkeys().initRegistration([=](
+			const Data::Passkey::RegisterData &data) {
+		Platform::WebAuthn::RegisterKeyLocalOnly(data, testServer, [=](
+				Platform::WebAuthn::RegisterResult result) {
+			if (result.success) {
+				session->passkeys().registerPasskey(result, [=] {
+					show->showToast(tr::lng_fork_passkeys_created(tr::now));
+					if (done) {
+						done();
+					}
+				});
+			} else if (result.error != Platform::WebAuthn::Error::Cancelled) {
+				show->showToast(tr::lng_fork_passkeys_create_error(tr::now));
+			}
+		});
+	}, [=](QString error) {
+		show->showToast(error);
+	});
+}
+
 void BuildPasskeysSection(
 		SectionBuilder &builder,
 		QPointer<Ui::SettingsButton> *addButton,
@@ -106,21 +135,46 @@ void BuildPasskeysSection(
 		*addButton = button;
 	}
 
+	if (Platform::WebAuthn::LocalOnlySupported()) {
+		auto localShown = session->passkeys().requestList(
+		) | rpl::map([session] {
+			return session->passkeys().canRegisterLocalOnly();
+		});
+		builder.addButton({
+			.id = u"passkeys/create_local"_q,
+			.title = tr::lng_fork_passkeys_button_local(),
+			.st = &st::settingsButtonActive,
+			.icon = { &st::settingsIconPasskeys },
+			.onClick = [controller, session] {
+				CreateLocalOnlyPasskey(controller->uiShow(), session);
+			},
+			.keywords = { u"add"_q, u"register"_q, u"create"_q, u"local"_q },
+			.highlight = { .rippleShape = true },
+			.shown = std::move(localShown),
+		});
+	}
+
 	builder.addSkip();
 	builder.add([=](const WidgetContext &ctx) {
-		const auto label = Ui::AddDividerText(
-			ctx.container,
-			tr::lng_settings_passkeys_button_about(
-				lt_link,
-				tr::lng_channel_earn_about_link(
-					lt_emoji,
-					rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
-					tr::rich
-				) | rpl::map([](TextWithEntities text) {
-					return tr::link(std::move(text), u"internal"_q);
-				}),
+		auto about = tr::lng_settings_passkeys_button_about(
+			lt_link,
+			tr::lng_channel_earn_about_link(
+				lt_emoji,
+				rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
 				tr::rich
-			));
+			) | rpl::map([](TextWithEntities text) {
+				return tr::link(std::move(text), u"internal"_q);
+			}),
+			tr::rich);
+		if (Platform::WebAuthn::LocalOnlySupported()) {
+			about = rpl::combine(
+				std::move(about),
+				tr::lng_fork_passkeys_local_about(tr::rich)
+			) | rpl::map([](TextWithEntities text, TextWithEntities local) {
+				return text.append(u"\n\n"_q).append(std::move(local));
+			});
+		}
+		const auto label = Ui::AddDividerText(ctx.container, std::move(about));
 		label->setClickHandlerFilter([controller, session](const auto &...) {
 			controller->show(Box(PasskeysNoneBox, session));
 			return false;
@@ -199,12 +253,14 @@ void Passkeys::setupContent() {
 						st::popupMenuWithIcons);
 					const auto handler = [=, id = passkey.id] {
 						ctrl->show(Ui::MakeConfirmBox({
-							.text = rpl::combine(
-								tr::lng_settings_passkeys_delete_sure_about(),
-								tr::lng_settings_passkeys_delete_sure_about2()
-							) | rpl::map([](QString a, QString b) {
-								return a + "\n\n" + b;
-							}),
+							.text = (Platform::WebAuthn::LocalOnlySupported()
+								? tr::lng_settings_passkeys_delete_sure_about()
+								: rpl::combine(
+									tr::lng_settings_passkeys_delete_sure_about(),
+									tr::lng_settings_passkeys_delete_sure_about2()
+								) | rpl::map([](QString a, QString b) {
+									return a + "\n\n" + b;
+								})),
 							.confirmed = [=](Fn<void()> close) {
 								session->passkeys().deletePasskey(
 									id,
@@ -437,7 +493,9 @@ void PasskeysNoneBox(
 		Ui::AddSkip(content);
 		addEntry(
 			tr::lng_settings_passkeys_none_info3_title(),
-			tr::lng_settings_passkeys_none_info3_about(),
+			(Platform::WebAuthn::LocalOnlySupported()
+				? tr::lng_fork_passkeys_local_short()
+				: tr::lng_settings_passkeys_none_info3_about()),
 			st::settingsIconPasskeysAboutIcon3);
 		Ui::AddSkip(content);
 		Ui::AddSkip(content);
@@ -447,36 +505,61 @@ void PasskeysNoneBox(
 	{
 		const auto &st = st::premiumPreviewDoubledLimitsBox;
 		const auto canRegister = session->passkeys().canRegister();
+		const auto localOnly = session->passkeys().canRegisterLocalOnly();
 		box->setStyle(st);
+		if (localOnly) {
+			const auto local = box->addRow(
+				object_ptr<Ui::RoundButton>(
+					content,
+					tr::lng_fork_passkeys_none_button_local(),
+					st::defaultLightButton),
+				st::boxRowPadding);
+			local->setClickedCallback([=] {
+				CreateLocalOnlyPasskey(
+					box->uiShow(),
+					session,
+					crl::guard(box, [=] { box->closeBox(); }));
+			});
+			box->widthValue() | rpl::on_next([=](int width) {
+				local->resizeToWidth(width
+					- st::boxRowPadding.left()
+					- st::boxRowPadding.right());
+			}, local->lifetime());
+			Ui::AddSkip(content);
+			Ui::AddSkip(content);
+		}
 		auto button = object_ptr<Ui::RoundButton>(
 			box,
-			canRegister
+			(canRegister
 				? tr::lng_settings_passkeys_none_button()
-				: tr::lng_settings_passkeys_none_button_unsupported(),
+				: tr::lng_settings_passkeys_none_button_unsupported()),
 			st::defaultActiveButton);
 		const auto createButton = button.data();
 		button->resizeToWidth(box->width()
 			- st.buttonPadding.left()
 			- st.buttonPadding.left());
+		const auto show = box->uiShow();
 		button->setClickedCallback([=] {
-			session->passkeys().initRegistration([=](
+			session->passkeys().initRegistration(crl::guard(box, [=](
 					const Data::Passkey::RegisterData &data) {
-				Platform::WebAuthn::RegisterKey(data, [=](
+				Platform::WebAuthn::RegisterKey(data, crl::guard(box, [=](
 						Platform::WebAuthn::RegisterResult result) {
 					if (!result.success) {
 						using Error = Platform::WebAuthn::Error;
 						if (result.error == Error::UnsignedBuild) {
-							box->uiShow()->showToast(
+							show->showToast(
 								tr::lng_settings_passkeys_unsigned_error(
 									tr::now));
 						}
 						return;
 					}
-					session->passkeys().registerPasskey(result, [=] {
-						box->closeBox();
-					});
-				});
-			});
+					session->passkeys().registerPasskey(
+						result,
+						crl::guard(box, [=] { box->closeBox(); }));
+				}));
+			}), crl::guard(box, [=](QString error) {
+				show->showToast(error);
+			}));
 		});
 		if (!canRegister) {
 			button->setAttribute(Qt::WA_TransparentForMouseEvents);
