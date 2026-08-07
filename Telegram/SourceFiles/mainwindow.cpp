@@ -456,7 +456,6 @@ void MainWindow::clearSetupEmailLock() {
 		_main->show();
 		updateControlsGeometry();
 		_main->showAnimated(std::move(oldContentCache), true);
-		Core::App().checkStartUrls();
 	}
 }
 

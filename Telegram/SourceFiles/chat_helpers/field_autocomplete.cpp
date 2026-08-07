@@ -532,7 +532,11 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			if (containsMentionUser(user)) {
 				return;
 			}
-			mrows.push_back({ user, source });
+			mrows.push_back({
+				.user = user,
+				.source = source,
+				.userpic = user->activeUserpicView(),
+			});
 		};
 		const auto markMentionCandidateIfExists = [&](
 				not_null<UserData*> user) {
@@ -1956,10 +1960,10 @@ void InitFieldAutocomplete(
 	}
 
 	field->tabbed(
-	) | rpl::on_next([=](not_null<bool*> handled) {
+	) | rpl::on_next([=](not_null<Ui::InputField::TabbedRequest*> request) {
 		if (!raw->isHidden()) {
 			raw->chooseSelected(FieldAutocomplete::ChooseMethod::ByTab);
-			*handled = true;
+			request->handled = true;
 		}
 	}, raw->lifetime());
 

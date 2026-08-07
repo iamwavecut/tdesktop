@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_web_page.h"
 #include "history/view/reactions/history_view_reactions_list.h"
 #include "info/info_memento.h"
+#include "iv/iv_rich_message_html_export.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
@@ -1098,6 +1099,20 @@ void AddDownloadFilesAction(
 		list);
 }
 
+void AddSaveRichHtmlAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	if (!request.overSelection || request.selectedItems.empty()) {
+		return;
+	}
+	Iv::AddSaveRichMessageHtmlAction(
+		menu,
+		request.navigation->parentController(),
+		request.selectedItems,
+		list);
+}
+
 void AddSaveToMarkdownFileAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
@@ -1227,6 +1242,7 @@ void AddMessageActions(
 	AddDeleteAction(menu, request, list);
 	AddRemoveFromChatAction(menu, request, list);
 	AddDownloadFilesAction(menu, request, list);
+	AddSaveRichHtmlAction(menu, request, list);
 	AddSaveToMarkdownFileAction(menu, request, list);
 	AddReportAction(menu, request, list);
 	if (request.item && request.selectedItems.empty()) {

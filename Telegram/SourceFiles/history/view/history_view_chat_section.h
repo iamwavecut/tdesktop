@@ -403,6 +403,7 @@ private:
 		std::optional<MsgId> localMessageId);
 
 	void validateSubsectionTabs() override;
+	void updateSubsectionTabsGeometry();
 	void setupEmptyPainter();
 	void refreshJoinGroupButton();
 	[[nodiscard]] bool emptyShown() const;
