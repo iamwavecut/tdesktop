@@ -61,6 +61,7 @@ optionsList = [
     'qt6',
     'skip-release',
     'build-stackwalk',
+    'qt-asserts',
     'win7',
 ]
 options = []
@@ -254,6 +255,8 @@ def filterByPlatform(commands):
                     inscope = False
                 elif len(scopes) == 1:
                     continue
+            if 'asserts' in scopes:
+                inscope = inscope and 'qt-asserts' in options
             skip = inscope if m.group(1) == '!' else not inscope
         elif not skip and not re.match(r'\s*#', command):
             if m and m.group(2) == 'version':
@@ -456,7 +459,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 0a0e4562722997a7916b740322748656fbead318
+    git checkout 0a3f68f4ad100f8672b6f3b2c830a138293d5872
 mac:
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
     cd qt6_highsierra
@@ -1623,11 +1626,15 @@ mac:
     done
 
     CONFIGURATIONS=-debug
+    ASSERTS=
 release:
     CONFIGURATIONS=-debug-and-release
+mac_asserts:
+    ASSERTS=-force-asserts
 mac:
     ./configure -prefix "$USED_PREFIX/Qt-$QT" \
         $CONFIGURATIONS \
+        $ASSERTS \
         -force-debug-info \
         -opensource \
         -confirm-license \
@@ -1657,8 +1664,11 @@ win:
     cd ..
 
     SET CONFIGURATIONS=-debug
+    SET ASSERTS=
 release:
     SET CONFIGURATIONS=-debug-and-release
+win_asserts:
+    SET ASSERTS=-force-asserts
 win:
     """ + removeDir('"%LIBS_DIR%\\Qt' + qt + '"') + """
     SET MOZJPEG_DIR=%LIBS_DIR%\\mozjpeg
@@ -1669,6 +1679,7 @@ win:
     SET LCMS2_DIR=%LIBS_DIR%\\liblcms2
     configure -prefix "%LIBS_DIR%\\Qt-%QT%" ^
         %CONFIGURATIONS% ^
+        %ASSERTS% ^
         -force-debug-info ^
         -opensource ^
         -confirm-license ^
@@ -1837,41 +1848,6 @@ mac:
     cmake --build build
     cmake --install build
 """)
-
-stage('protobuf', """
-win:
-    git clone --recursive -b v21.9 https://github.com/protocolbuffers/protobuf
-    cd protobuf
-    git clone https://github.com/abseil/abseil-cpp third_party/abseil-cpp
-    cd third_party/abseil-cpp
-    git checkout 273292d1cf
-    cd ../..
-    mkdir build
-    cd build
-    cmake .. ^
-        -Dprotobuf_BUILD_TESTS=OFF ^
-        -Dprotobuf_BUILD_PROTOBUF_BINARIES=ON ^
-        -Dprotobuf_BUILD_LIBPROTOC=ON ^
-        -Dprotobuf_WITH_ZLIB_DEFAULT=OFF ^
-        -Dprotobuf_DEBUG_POSTFIX=""
-    cmake --build . --config Release
-    cmake --build . --config Debug
-""")
-# mac:
-#     git clone --recursive -b v21.9 https://github.com/protocolbuffers/protobuf
-#     cd protobuf
-#     git clone https://github.com/abseil/abseil-cpp third_party/abseil-cpp
-#     cd third_party/abseil-cpp
-#     git checkout 273292d1cf
-#     cd ../..
-#     mkdir build
-#     cd build
-#     CFLAGS="$UNGUARDED" CPPFLAGS="$UNGUARDED" cmake .. \
-#         -Dprotobuf_BUILD_TESTS=OFF \
-#         -Dprotobuf_BUILD_PROTOBUF_BINARIES=ON \
-#         -Dprotobuf_BUILD_LIBPROTOC=ON \
-#         -Dprotobuf_WITH_ZLIB_DEFAULT=OFF
-#     cmake --build .
 
 stage('tde2e', """
     git clone https://github.com/tdlib/td.git tde2e

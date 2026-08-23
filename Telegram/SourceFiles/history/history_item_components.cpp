@@ -218,6 +218,9 @@ HiddenSenderInfo::HiddenSenderInfo(
 	Expects(!name.isEmpty());
 
 	const auto parts = name.trimmed().split(' ', Qt::SkipEmptyParts);
+	if (parts.isEmpty()) {
+		return;
+	}
 	firstName = parts[0];
 	for (const auto &part : parts.mid(1)) {
 		if (!lastName.isEmpty()) {
@@ -1173,7 +1176,7 @@ void ReplyKeyboard::clickHandlerActiveChanged(
 ReplyKeyboard::ButtonCoords ReplyKeyboard::findButtonCoordsByClickHandler(
 		const ClickHandlerPtr &p) {
 	for (int i = 0, rows = _rows.size(); i != rows; ++i) {
-		auto &row = _rows[i];
+		const auto &row = _rows[i];
 		for (int j = 0, cols = row.size(); j != cols; ++j) {
 			if (row[j].link == p) {
 				return { i, j };
@@ -1268,9 +1271,7 @@ void ReplyKeyboard::Style::paintButton(
 		}
 	}
 	paintButtonIcon(p, st, rect, outerWidth, button.iconType);
-	if (button.type == HistoryMessageMarkupButton::Type::CallbackWithPassword
-		|| button.type == HistoryMessageMarkupButton::Type::Callback
-		|| button.type == HistoryMessageMarkupButton::Type::Game) {
+	if (HistoryMessageMarkupButton::LoadsOnActivate(button.type)) {
 		if (const auto data = button.link->getButton()) {
 			if (data->requestId) {
 				paintButtonLoading(

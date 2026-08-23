@@ -1088,7 +1088,7 @@ void InnerWidget::preloadMore(Direction direction) {
 
 		requestId = 0;
 
-		auto &results = result.c_channels_adminLogResults();
+		const auto &results = result.c_channels_adminLogResults();
 		_channel->owner().processUsers(results.vusers());
 		_channel->owner().processChats(results.vchats());
 		if (!loadedFlag) {
