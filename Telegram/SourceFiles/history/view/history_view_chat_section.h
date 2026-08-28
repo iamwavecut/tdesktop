@@ -367,6 +367,7 @@ private:
 	void confirmClearSelected();
 	void confirmClearDeletedMessages();
 	void confirmForwardSelected();
+	void confirmForwardAndDeleteSelected();
 	void clearSelected();
 	void refreshClearDeletedMessagesState();
 	void setPinnedVisibility(bool shown);

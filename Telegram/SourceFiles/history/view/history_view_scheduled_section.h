@@ -97,6 +97,8 @@ public:
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) override;
 	std::shared_ptr<Window::SectionMemento> createMemento() override;
+	auto createIdentityMemento()
+		-> std::shared_ptr<Window::SectionMemento> override;
 	bool showMessage(
 		PeerId peerId,
 		const Window::SectionShow &params,
@@ -211,6 +213,8 @@ private:
 	void updateInnerVisibleArea();
 	void updateControlsGeometry();
 	void updateAdaptiveLayout();
+	[[nodiscard]] auto createIdentityMementoTyped()
+		-> std::shared_ptr<ScheduledMemento>;
 	void saveState(not_null<ScheduledMemento*> memento);
 	void restoreState(not_null<ScheduledMemento*> memento);
 	void showAtPosition(
