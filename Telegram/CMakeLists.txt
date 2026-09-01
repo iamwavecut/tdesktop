@@ -42,8 +42,33 @@ include(cmake/telegram_apple_swift_runtime.cmake)
 include(cmake/generate_appstream_changelog.cmake)
 include(cmake/td_forkgram.cmake)
 
+find_package(Python3 REQUIRED)
+set(mcp_schema_output ${CMAKE_CURRENT_BINARY_DIR}/gen/mcp_schema)
+set(mcp_schema_files
+    ${mcp_schema_output}.cpp
+    ${mcp_schema_output}.h
+)
+add_custom_command(
+OUTPUT
+    ${mcp_schema_files}
+COMMAND
+    ${Python3_EXECUTABLE}
+    ${src_loc}/codegen/mcp/codegen_mcp_schema.py
+    -o${mcp_schema_output}
+    ${src_loc}/mtproto/scheme/mtproto.tl
+    ${src_loc}/mtproto/scheme/api.tl
+DEPENDS
+    ${src_loc}/codegen/mcp/codegen_mcp_schema.py
+    ${src_loc}/mtproto/scheme/mtproto.tl
+    ${src_loc}/mtproto/scheme/api.tl
+COMMENT "Generating MCP TL schema"
+)
+target_sources(Telegram PRIVATE ${mcp_schema_files})
+
 if (DESKTOP_APP_TEST_APPS)
     include(cmake/tests.cmake)
+    target_sources(test_mcp PRIVATE ${mcp_schema_files})
+    target_include_directories(test_mcp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
 endif()
 
 if (WIN32)
@@ -583,6 +608,23 @@ PRIVATE
     core/deep_links/deep_links_types.h
     core/external_control.cpp
     core/external_control.h
+    core/mcp/mcp_dispatcher.cpp
+    core/mcp/mcp_dispatcher.h
+    core/mcp/mcp_http_parser.cpp
+    core/mcp/mcp_http_parser.h
+    core/mcp/mcp_http_server.cpp
+    core/mcp/mcp_http_server.h
+    core/mcp/mcp_protocol.cpp
+    core/mcp/mcp_protocol.h
+    core/mcp/mcp_service.cpp
+    core/mcp/mcp_service.h
+    core/mcp/mcp_tl_registry.cpp
+    core/mcp/mcp_tl_registry.h
+    core/mcp/mcp_tl_codec.cpp
+    core/mcp/mcp_tl_codec.h
+    core/mcp/mcp_ui_driver.cpp
+    core/mcp/mcp_ui_driver.h
+    codegen/mcp/codegen_mcp_schema.py
     core/file_utilities.cpp
     core/file_utilities.h
     core/launcher.cpp
@@ -2699,4 +2741,3 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services" RENAME "io.github.forkgram.tdesktop.service")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "io.github.forkgram.tdesktop.metainfo.xml")
 endif()
-

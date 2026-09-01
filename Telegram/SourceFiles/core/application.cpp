@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "core/local_url_handlers.h"
 #include "core/launcher.h"
+#include "core/mcp/mcp_service.h"
 #include "core/proxy_rotation_manager.h"
 #include "core/ui_integration.h"
 #include "core/version.h"
@@ -256,6 +257,8 @@ void Application::closeAdditionalWindows() {
 }
 
 Application::~Application() {
+	_mcp = nullptr;
+
 	if (_savedWindows) {
 		_savedWindows->writeNow();
 	}
@@ -309,6 +312,10 @@ void Application::run() {
 	_notifications = std::make_unique<Window::Notifications::System>();
 
 	startLocalStorage();
+	_mcp = std::make_unique<Mcp::Service>(this);
+	if (!_mcp->start()) {
+		LOG(("MCP Error: failed to listen: %1").arg(_mcp->errorString()));
+	}
 
 	style::SetCustomFont(settings().customFontFamily());
 	style::internal::StartFonts();

@@ -7,6 +7,66 @@
 add_executable(test_text WIN32)
 init_target(test_text "(tests)")
 
+add_executable(test_mcp)
+init_target(test_mcp "(tests)")
+
+add_executable(test_mcp_conformance_server)
+init_target(test_mcp_conformance_server "(tests)")
+
+target_include_directories(test_mcp PRIVATE ${src_loc})
+
+nice_target_sources(test_mcp ${src_loc}
+PRIVATE
+    core/mcp/mcp_dispatcher.cpp
+    core/mcp/mcp_dispatcher.h
+    core/mcp/mcp_http_parser.cpp
+    core/mcp/mcp_http_parser.h
+    core/mcp/mcp_http_server.cpp
+    core/mcp/mcp_http_server.h
+    core/mcp/mcp_protocol.cpp
+    core/mcp/mcp_protocol.h
+    core/mcp/mcp_tl_registry.cpp
+    core/mcp/mcp_tl_registry.h
+    core/mcp/mcp_tl_codec.cpp
+    core/mcp/mcp_tl_codec.h
+    tests/test_mcp.cpp
+)
+
+target_link_libraries(test_mcp
+PRIVATE
+    desktop-app::lib_base
+    desktop-app::external_qt
+)
+
+set_target_properties(test_mcp PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+target_include_directories(test_mcp_conformance_server PRIVATE ${src_loc})
+
+nice_target_sources(test_mcp_conformance_server ${src_loc}
+PRIVATE
+    core/mcp/mcp_dispatcher.cpp
+    core/mcp/mcp_dispatcher.h
+    core/mcp/mcp_http_parser.cpp
+    core/mcp/mcp_http_parser.h
+    core/mcp/mcp_http_server.cpp
+    core/mcp/mcp_http_server.h
+    core/mcp/mcp_protocol.cpp
+    core/mcp/mcp_protocol.h
+    tests/test_mcp_conformance_server.cpp
+)
+
+target_link_libraries(test_mcp_conformance_server
+PRIVATE
+    desktop-app::lib_base
+    desktop-app::external_qt
+)
+
+set_target_properties(test_mcp_conformance_server PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_include_directories(test_text PRIVATE ${src_loc})
 
 nice_target_sources(test_text ${src_loc}

@@ -112,6 +112,10 @@ class Environment;
 
 namespace Core {
 
+namespace Mcp {
+class Service;
+} // namespace Mcp
+
 struct LocalUrlHandler;
 class ScreenshotProtection;
 class Settings;
@@ -166,6 +170,11 @@ public:
 	}
 	[[nodiscard]] ScreenshotProtection &screenshotProtection() const {
 		return *_screenshotProtection;
+	}
+	[[nodiscard]] Mcp::Service &mcp() const {
+		Expects(_mcp != nullptr);
+
+		return *_mcp;
 	}
 
 	// Windows interface.
@@ -442,6 +451,7 @@ private:
 	const std::unique_ptr<Export::Manager> _exportManager;
 	const std::unique_ptr<Calls::Instance> _calls;
 	const std::unique_ptr<Iv::Instance> _iv;
+	std::unique_ptr<Mcp::Service> _mcp;
 	base::flat_map<
 		Window::SeparateId,
 		std::unique_ptr<Window::Controller>> _windows;

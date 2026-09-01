@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_video_bubble.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/mcp/mcp_service.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "platform/platform_specific.h"
@@ -71,6 +72,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QUrl>
 #include <QtCore/QPointer>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 
 #include <algorithm>
 
@@ -258,7 +261,7 @@ public:
 		QString title,
 		QString placeholder,
 		Fn<QString()> current,
-		Fn<void(QString)> save,
+		Fn<bool(QString)> save,
 		Fn<bool(QString)> invalid,
 		bool masked = false);
 
@@ -271,7 +274,7 @@ private:
 	const QString _title;
 	const QString _placeholder;
 	const Fn<QString()> _current;
-	const Fn<void(QString)> _save;
+	const Fn<bool(QString)> _save;
 	const Fn<bool(QString)> _invalid;
 	const bool _masked = false;
 	Fn<void()> _setInnerFocus;
@@ -282,7 +285,7 @@ TextValueBox::TextValueBox(
 	QString title,
 	QString placeholder,
 	Fn<QString()> current,
-	Fn<void(QString)> save,
+	Fn<bool(QString)> save,
 	Fn<bool(QString)> invalid,
 	bool masked)
 : _title(std::move(title))
@@ -370,7 +373,10 @@ void TextValueBox::prepare() {
 			return;
 		}
 		const auto weak = base::make_weak(this);
-		_save(value);
+		if (!_save(value)) {
+			showError();
+			return;
+		}
 		Core::App().saveSettings();
 		if (weak) {
 			closeBox();
@@ -673,6 +679,14 @@ void MarkdownClipboardTextBox::prepare() {
 
 using namespace Builder;
 
+[[nodiscard]] std::optional<quint16> ParseMcpPort(QString value) {
+	auto ok = false;
+	const auto port = value.trimmed().toInt(&ok);
+	return (ok && port >= 1024 && port <= 65535)
+		? std::make_optional(quint16(port))
+		: std::nullopt;
+}
+
 void BuildForkSectionContent(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	struct State {
@@ -683,6 +697,11 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 		rpl::variable<QString> apiKey = SummaryApiKeyLabel();
 		rpl::variable<QString> model = SummaryModelLabel();
 		rpl::variable<QString> linkRewrites = LinkRewriteRulesLabel();
+		rpl::variable<QString> mcpPort = QString::number(
+			Core::App().mcp().configuredPort());
+		rpl::variable<QString> mcpEndpoint = Core::App().mcp().available()
+			? Core::App().mcp().endpoint()
+			: tr::lng_settings_mcp_unavailable(tr::now);
 	};
 	const auto summaryLabels = std::make_shared<SummaryLabels>();
 
@@ -1051,6 +1070,55 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	builder.addDivider();
 	builder.addSkip();
 
+	builder.addSubsectionTitle(tr::lng_settings_mcp_title());
+	builder.addButton({
+		.id = u"fork/mcp/port"_q,
+		.title = tr::lng_settings_mcp_port(),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconNetwork },
+		.label = summaryLabels->mcpPort.value(),
+		.onClick = [=] {
+			controller->show(Box<TextValueBox>(
+				tr::lng_settings_mcp_port(tr::now),
+				tr::lng_settings_mcp_port_placeholder(tr::now),
+				[] {
+					return QString::number(
+						Core::App().mcp().configuredPort());
+				},
+				[=](QString value) {
+					const auto port = ParseMcpPort(std::move(value));
+					if (!port || !Core::App().mcp().rebind(*port)) {
+						return false;
+					}
+					summaryLabels->mcpPort = QString::number(*port);
+					summaryLabels->mcpEndpoint = Core::App().mcp().endpoint();
+					return true;
+				},
+				[](QString value) {
+					return !ParseMcpPort(std::move(value));
+				}));
+		},
+		.keywords = { u"mcp"_q, u"server"_q, u"port"_q },
+	});
+	builder.addButton({
+		.id = u"fork/mcp/endpoint"_q,
+		.title = tr::lng_settings_mcp_endpoint(),
+		.st = &st::settingsButton,
+		.icon = { &st::menuIconCopy },
+		.label = summaryLabels->mcpEndpoint.value(),
+		.onClick = [=] {
+			if (Core::App().mcp().available()) {
+				QGuiApplication::clipboard()->setText(
+					Core::App().mcp().endpoint());
+			}
+		},
+		.keywords = { u"mcp"_q, u"endpoint"_q, u"http"_q },
+	});
+
+	builder.addSkip();
+	builder.addDivider();
+	builder.addSkip();
+
 	builder.addSubsectionTitle(rpl::single(u"Summarization"_q));
 	builder.addButton({
 		.id = u"fork/summarization/base_url"_q,
@@ -1063,11 +1131,12 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 				u"Summarization provider"_q,
 				u"Base URL including /v1"_q,
 				[] { return Core::App().settings().fork().summaryApiBaseUrl(); },
-				[=](QString value) {
-					const auto validated = qthelp::validate_url(value.trimmed());
-					Core::App().settings().fork().setSummaryApiBaseUrl(validated);
-					summaryLabels->baseUrl = SummaryApiBaseUrlLabel();
-				},
+					[=](QString value) {
+						const auto validated = qthelp::validate_url(value.trimmed());
+						Core::App().settings().fork().setSummaryApiBaseUrl(validated);
+						summaryLabels->baseUrl = SummaryApiBaseUrlLabel();
+						return true;
+					},
 				[](QString value) { return InvalidSummaryApiBaseUrl(value); }));
 		},
 		.keywords = {
@@ -1090,11 +1159,12 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 				u"Summarization API key"_q,
 				u"Optional"_q,
 				[] { return Core::App().settings().fork().summaryApiKey(); },
-				[=](QString value) {
-					Core::App().settings().fork().setSummaryApiKey(
-						value.trimmed());
-					summaryLabels->apiKey = SummaryApiKeyLabel();
-				},
+					[=](QString value) {
+						Core::App().settings().fork().setSummaryApiKey(
+							value.trimmed());
+						summaryLabels->apiKey = SummaryApiKeyLabel();
+						return true;
+					},
 				[](QString) { return false; },
 				true));
 		},
@@ -1117,11 +1187,12 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 				u"Summarization model"_q,
 				u"Model name"_q,
 				[] { return Core::App().settings().fork().summaryModel(); },
-				[=](QString value) {
-					Core::App().settings().fork().setSummaryModel(
-						value.trimmed());
-					summaryLabels->model = SummaryModelLabel();
-				},
+					[=](QString value) {
+						Core::App().settings().fork().setSummaryModel(
+							value.trimmed());
+						summaryLabels->model = SummaryModelLabel();
+						return true;
+					},
 				[](QString value) { return InvalidSummaryModel(value); }));
 		},
 		.keywords = {

@@ -547,6 +547,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // Fork settings.
 "lng_settings_section_fork" = "Fork Settings";
+"lng_settings_mcp_title" = "MCP server";
+"lng_settings_mcp_port" = "MCP port";
+"lng_settings_mcp_endpoint" = "MCP endpoint";
+"lng_settings_mcp_port_placeholder" = "Port from 1024 to 65535";
+"lng_settings_mcp_unavailable" = "Unavailable";
 "lng_settings_square_avatats" = "Square avatars";
 "lng_settings_audio_fade" = "Audio fade";
 "lng_settings_uri_scheme" = "Open links with custom URI Scheme";
