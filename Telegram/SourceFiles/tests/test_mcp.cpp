@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/mcp/mcp_protocol.h"
+#include "core/mcp/mcp_access_policy.h"
 #include "core/mcp/mcp_http_parser.h"
 #include "core/mcp/mcp_dispatcher.h"
 #include "core/mcp/mcp_http_server.h"
@@ -105,6 +106,21 @@ void TestClientInfoMetadataIsOptional() {
 		u"request without optional clientInfo was rejected"_q);
 }
 
+void TestCompatibilityRequestAllowsOmittedParams() {
+	const auto bytes = QJsonDocument(QJsonObject{
+		{ u"jsonrpc"_q, u"2.0"_q },
+		{ u"id"_q, 8 },
+		{ u"method"_q, u"tools/list"_q },
+	}).toJson(QJsonDocument::Compact);
+	const auto parsed = Core::Mcp::ParseRequest(
+		bytes,
+		Core::Mcp::kCompatibilityProtocolVersion);
+	Require(std::holds_alternative<Request>(parsed),
+		u"compatibility request without params was rejected"_q);
+	Require(std::get<Request>(parsed).params.isEmpty(),
+		u"compatibility request invented params"_q);
+}
+
 void TestDiscoverResultAdvertisesCurrentProtocol() {
 	const auto result = Core::Mcp::DiscoverResult(
 		u"Forkgram"_q,
@@ -117,6 +133,9 @@ void TestDiscoverResultAdvertisesCurrentProtocol() {
 	const auto capabilities = result.value(u"capabilities"_q).toObject();
 	Require(capabilities.contains(u"tools"_q),
 		u"discover result omitted tools capability"_q);
+	Require(capabilities.value(u"tools"_q).toObject()
+		.value(u"listChanged"_q).toBool(),
+		u"discover result did not advertise tool list changes"_q);
 	Require(capabilities.contains(u"resources"_q),
 		u"discover result omitted resources capability"_q);
 	const auto meta = result.value(u"_meta"_q).toObject();
@@ -534,6 +553,166 @@ void TestDispatcherAllowsOmittedEmptyArguments() {
 	Require(called, u"tool call without optional arguments was rejected"_q);
 }
 
+void TestAccessPolicyAppliesToolAndCategoryChoices() {
+	using Core::Mcp::ToolCategoryState;
+	const auto token = QByteArray(32, 'x');
+	auto policy = Core::Mcp::AccessPolicy({
+		{
+			.name = u"telegram.messages.list"_q,
+			.category = u"messages"_q,
+			.description = u"List messages"_q,
+		},
+		{
+			.name = u"telegram.messages.send"_q,
+			.category = u"messages"_q,
+			.description = u"Send a message"_q,
+		},
+		{
+			.name = u"telegram.ui.click"_q,
+			.category = u"ui"_q,
+			.description = u"Click a widget"_q,
+		},
+	}, {
+		.enabled = true,
+		.authenticationEnabled = false,
+		.bearerToken = token,
+	});
+	Require(policy.enabled(), u"access policy lost the enabled state"_q);
+	Require(!policy.authenticationEnabled(),
+		u"access policy changed the authentication state"_q);
+	Require(policy.bearerToken() == token,
+		u"access policy changed the bearer token"_q);
+	Require(policy.enabledToolCount() == 3,
+		u"access policy did not enable tools by default"_q);
+	Require(policy.categoryState(u"messages"_q) == ToolCategoryState::All,
+		u"fully enabled category did not report all"_q);
+
+	Require(policy.setToolEnabled(u"telegram.messages.send"_q, false),
+		u"disabling a tool was not reported as a change"_q);
+	Require(!policy.toolEnabled(u"telegram.messages.send"_q),
+		u"disabled tool remained enabled"_q);
+	Require(policy.categoryState(u"messages"_q) == ToolCategoryState::Partial,
+		u"partially enabled category did not report partial"_q);
+	Require(policy.setCategoryEnabled(u"messages"_q, true),
+		u"category bulk enable was not reported as a change"_q);
+	Require(policy.categoryState(u"messages"_q) == ToolCategoryState::All,
+		u"category bulk enable missed a child"_q);
+	Require(policy.setCategoryEnabled(u"messages"_q, false),
+		u"category bulk disable was not reported as a change"_q);
+	Require(policy.categoryState(u"messages"_q) == ToolCategoryState::None,
+		u"category bulk disable missed a child"_q);
+	Require(policy.enabledToolCount() == 1,
+		u"access policy returned the wrong enabled count"_q);
+}
+
+void TestAccessPolicyMigrationDefaults() {
+	const auto existing = Core::Mcp::DefaultAccessPolicyState(true);
+	Require(existing.enabled && !existing.authenticationEnabled,
+		u"existing MCP profile did not preserve compatibility defaults"_q);
+	const auto fresh = Core::Mcp::DefaultAccessPolicyState(false);
+	Require(!fresh.enabled && fresh.authenticationEnabled,
+		u"fresh MCP profile did not receive safe defaults"_q);
+}
+
+void TestAccessPolicyNormalizesStoredTools() {
+	const auto stored = QByteArray(
+		R"(["telegram.ui.click",7,"missing.tool","telegram.messages.send","telegram.ui.click"])");
+	auto policy = Core::Mcp::AccessPolicy({
+		{
+			.name = u"telegram.messages.send"_q,
+			.category = u"messages"_q,
+			.description = u"Send a message"_q,
+		},
+		{
+			.name = u"telegram.ui.click"_q,
+			.category = u"ui"_q,
+			.description = u"Click a widget"_q,
+		},
+	}, {
+		.disabledTools = stored,
+	});
+	Require(policy.enabledToolCount() == 0,
+		u"stored disabled tools were not restored"_q);
+	Require(policy.serializedDisabledTools()
+		== QByteArray(
+			R"(["telegram.messages.send","telegram.ui.click"])"),
+		u"stored disabled tools were not normalized deterministically"_q);
+	auto malformed = Core::Mcp::AccessPolicy({
+		{
+			.name = u"telegram.messages.send"_q,
+			.category = u"messages"_q,
+			.description = u"Send a message"_q,
+		},
+	}, { .disabledTools = QByteArray("not-json") });
+	Require(malformed.enabledToolCount() == 1,
+		u"malformed tool policy did not fall back to all enabled"_q);
+}
+
+void TestDispatcherFiltersToolsAndCalls() {
+	auto dispatcher = Core::Mcp::Dispatcher(u"Forkgram"_q, u"7.1.4"_q);
+	auto called = false;
+	for (const auto &name : {
+			u"telegram.messages.list"_q,
+			u"telegram.messages.send"_q,
+			u"telegram.ui.click"_q }) {
+		dispatcher.addTool({
+			.name = name,
+			.description = u"Tool"_q,
+			.inputSchema = QJsonObject{ { u"type"_q, u"object"_q } },
+			.outputSchema = QJsonObject{ { u"type"_q, u"object"_q } },
+			.handler = [&](const QJsonObject &, auto done) {
+				called = true;
+				done({});
+			},
+		});
+	}
+	dispatcher.setToolFilter([](const QString &name) {
+		return name != u"telegram.messages.send"_q;
+	});
+	const auto catalog = dispatcher.toolCatalog();
+	Require(catalog.size() == 3,
+		u"dispatcher catalog omitted registered tools"_q);
+	Require(catalog[0].category == u"messages"_q
+		&& catalog[2].category == u"ui"_q,
+		u"dispatcher catalog derived the wrong categories"_q);
+
+	auto listed = QJsonObject();
+	dispatcher.handle(Request{
+		.id = 11,
+		.method = u"tools/list"_q,
+		.params = { { u"_meta"_q, ValidMeta() } },
+	}, [&](QJsonObject response) {
+		listed = std::move(response);
+	});
+	const auto tools = listed.value(u"result"_q).toObject()
+		.value(u"tools"_q).toArray();
+	Require(tools.size() == 2,
+		u"tools/list did not hide the filtered tool"_q);
+	Require(tools[0].toObject().value(u"name"_q)
+		== u"telegram.messages.list"_q,
+		u"tools/list changed deterministic ordering"_q);
+
+	auto rejected = QJsonObject();
+	dispatcher.handle(Request{
+		.id = 12,
+		.method = u"tools/call"_q,
+		.params = {
+			{ u"name"_q, u"telegram.messages.send"_q },
+			{ u"arguments"_q, QJsonObject() },
+			{ u"_meta"_q, ValidMeta() },
+		},
+	}, [&](QJsonObject response) {
+		rejected = std::move(response);
+	});
+	const auto error = rejected.value(u"error"_q).toObject();
+	Require(error.value(u"code"_q) == -32023,
+		u"disabled tool returned the wrong JSON-RPC code"_q);
+	Require(error.value(u"data"_q).toObject().value(u"code"_q)
+		== u"TOOL_DISABLED"_q,
+		u"disabled tool omitted its structured error code"_q);
+	Require(!called, u"disabled tool handler was invoked"_q);
+}
+
 [[nodiscard]] QByteArray HttpRequestBytes(
 		quint16 port,
 		const QByteArray &method,
@@ -552,6 +731,20 @@ void TestDispatcherAllowsOmittedEmptyArguments() {
 	return result
 		+ "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n"
 		+ body;
+}
+
+[[nodiscard]] QByteArray AuthenticatedHttpRequestBytes(
+		quint16 port,
+		const QByteArray &method,
+		const QByteArray &body,
+		const QByteArray &token,
+		const QByteArray &name = {}) {
+	auto result = HttpRequestBytes(port, method, body, name);
+	const auto offset = result.indexOf("Content-Length:");
+	Expects(offset > 0);
+
+	result.insert(offset, "Authorization: Bearer " + token + "\r\n");
+	return result;
 }
 
 [[nodiscard]] QByteArray CodexHttpRequestBytes(
@@ -639,6 +832,8 @@ void TestHttpServerSupportsCodexClient() {
 		u"Codex initialize response returned the wrong version"_q);
 	Require(initialized.contains("\"name\":\"Forkgram\""),
 		u"Codex initialize response omitted server info"_q);
+	Require(initialized.contains("\"listChanged\":true"),
+		u"Codex initialize response did not advertise tool list changes"_q);
 
 	const auto notification = QByteArray(
 		R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
@@ -700,6 +895,163 @@ void TestHttpServerReportsUnsupportedVersion() {
 		u"unsupported version error omitted requested version"_q);
 	Require(response.contains("\"supported\":[\"2026-07-28\"]"),
 		u"unsupported version error omitted supported versions"_q);
+}
+
+void TestHttpServerRequiresBearerToken() {
+	auto dispatcher = Core::Mcp::Dispatcher(u"Forkgram"_q, u"7.1.4"_q);
+	auto server = Core::Mcp::HttpServer(&dispatcher);
+	Require(server.listen(0), u"auth test server did not listen"_q);
+	const auto body = QJsonDocument(QJsonObject{
+		{ u"jsonrpc"_q, u"2.0"_q },
+		{ u"id"_q, 81 },
+		{ u"method"_q, u"server/discover"_q },
+		{ u"params"_q, QJsonObject{ { u"_meta"_q, ValidMeta() } } },
+	}).toJson(QJsonDocument::Compact);
+	const auto rawToken = QByteArray(32, 'x');
+	const auto encodedToken = rawToken.toBase64(
+		QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+	server.setBearerToken(rawToken);
+
+	const auto missing = SendRawClosedRequest(
+		server,
+		HttpRequestBytes(server.port(), "server/discover", body));
+	Require(missing.startsWith("HTTP/1.1 401 Unauthorized\r\n"),
+		u"server accepted a request without a bearer token"_q);
+	Require(missing.contains(
+		"WWW-Authenticate: Bearer realm=\"Forkgram MCP\"\r\n"),
+		u"missing bearer response omitted the challenge"_q);
+
+	const auto invalid = SendRawClosedRequest(
+		server,
+		AuthenticatedHttpRequestBytes(
+			server.port(),
+			"server/discover",
+			body,
+			QByteArray(43, 'z')));
+	Require(invalid.startsWith("HTTP/1.1 401 Unauthorized\r\n"),
+		u"server accepted an invalid bearer token"_q);
+	Require(invalid.contains("error=\"invalid_token\""),
+		u"invalid bearer response omitted invalid_token"_q);
+
+	const auto valid = SendRawClosedRequest(
+		server,
+		AuthenticatedHttpRequestBytes(
+			server.port(),
+			"server/discover",
+			body,
+			encodedToken));
+	Require(valid.startsWith("HTTP/1.1 200 OK\r\n"),
+		u"server rejected a valid bearer token"_q);
+
+	server.setBearerToken({});
+	const auto disabled = SendClosedRequest(
+		server,
+		"server/discover",
+		body);
+	Require(disabled.startsWith("HTTP/1.1 200 OK\r\n"),
+		u"server required authentication after it was disabled"_q);
+}
+
+void TestHttpServerStopCancelsTool() {
+	auto dispatcher = Core::Mcp::Dispatcher(u"Forkgram"_q, u"7.1.4"_q);
+	auto loop = QEventLoop();
+	auto cancelled = false;
+	auto serverPointer = static_cast<Core::Mcp::HttpServer*>(nullptr);
+	dispatcher.addTool({
+		.name = u"telegram.stop_test"_q,
+		.description = u"Stop test"_q,
+		.inputSchema = QJsonObject{ { u"type"_q, u"object"_q } },
+		.outputSchema = QJsonObject{ { u"type"_q, u"object"_q } },
+		.cancellableHandler = [&](
+			const QJsonObject &,
+			const Core::Mcp::CancellationPtr &cancellation,
+			auto) {
+			cancellation->setHandler([&] {
+				cancelled = true;
+				loop.quit();
+			});
+			QTimer::singleShot(0, [&] { serverPointer->stop(); });
+		},
+	});
+	auto server = Core::Mcp::HttpServer(&dispatcher);
+	serverPointer = &server;
+	Require(server.listen(0), u"stop test server did not listen"_q);
+	const auto originalPort = server.port();
+	auto socket = QTcpSocket();
+	auto timeout = QTimer();
+	timeout.setSingleShot(true);
+	QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+	timeout.start(3000);
+	const auto body = QJsonDocument(QJsonObject{
+		{ u"jsonrpc"_q, u"2.0"_q },
+		{ u"id"_q, u"stop-call"_q },
+		{ u"method"_q, u"tools/call"_q },
+		{ u"params"_q, QJsonObject{
+			{ u"name"_q, u"telegram.stop_test"_q },
+			{ u"arguments"_q, QJsonObject() },
+			{ u"_meta"_q, ValidMeta() },
+		} },
+	}).toJson(QJsonDocument::Compact);
+	socket.connectToHost(QHostAddress::LocalHost, originalPort);
+	socket.write(HttpRequestBytes(
+		originalPort,
+		"tools/call",
+		body,
+		"telegram.stop_test"));
+	loop.exec();
+	Require(timeout.isActive() && cancelled,
+		u"stopping the server did not cancel the active tool"_q);
+	Require(server.port() == 0, u"stopped server retained its port"_q);
+	Require(server.listen(originalPort), u"stopped server did not restart"_q);
+}
+
+void TestBearerRefreshDisconnectsSubscription() {
+	auto dispatcher = Core::Mcp::Dispatcher(u"Forkgram"_q, u"7.1.4"_q);
+	auto server = Core::Mcp::HttpServer(&dispatcher);
+	Require(server.listen(0), u"auth disconnect server did not listen"_q);
+	auto socket = QTcpSocket();
+	auto response = QByteArray();
+	auto changed = false;
+	auto disconnected = false;
+	auto loop = QEventLoop();
+	auto timeout = QTimer();
+	timeout.setSingleShot(true);
+	QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+	QObject::connect(&socket, &QTcpSocket::readyRead, [&] {
+		response.append(socket.readAll());
+		if (!changed
+			&& response.contains(
+				"notifications/subscriptions/acknowledged")) {
+			changed = true;
+			QTimer::singleShot(0, [&] {
+				server.setBearerToken({});
+			});
+		}
+	});
+	QObject::connect(&socket, &QTcpSocket::disconnected, [&] {
+		disconnected = true;
+		loop.quit();
+	});
+	const auto body = QJsonDocument(QJsonObject{
+		{ u"jsonrpc"_q, u"2.0"_q },
+		{ u"id"_q, u"auth-subscription"_q },
+		{ u"method"_q, u"subscriptions/listen"_q },
+		{ u"params"_q, QJsonObject{
+			{ u"notifications"_q, QJsonObject{
+				{ u"toolsListChanged"_q, true },
+			} },
+			{ u"_meta"_q, ValidMeta() },
+		} },
+	}).toJson(QJsonDocument::Compact);
+	timeout.start(3000);
+	socket.connectToHost(QHostAddress::LocalHost, server.port());
+	socket.write(HttpRequestBytes(
+		server.port(),
+		"subscriptions/listen",
+		body));
+	loop.exec();
+	Require(timeout.isActive() && changed && disconnected,
+		u"bearer token refresh did not disconnect the subscription"_q);
 }
 
 void TestHttpServerUses404ForUnknownRpcMethod() {
@@ -885,10 +1237,14 @@ void TestHttpSubscriptionsDeliverResourceUpdates() {
 			&& response.contains("notifications/subscriptions/acknowledged")) {
 			published = true;
 			server.publish(
+				u"notifications/tools/list_changed"_q,
+				{});
+			server.publish(
 				u"notifications/resources/updated"_q,
 				{ { u"uri"_q, u"telegram://updates?cursor=9"_q } });
 		}
-		if (response.contains("telegram://updates?cursor=9")) {
+		if (response.contains("notifications/tools/list_changed")
+			&& response.contains("telegram://updates?cursor=9")) {
 			loop.quit();
 		}
 	});
@@ -900,6 +1256,7 @@ void TestHttpSubscriptionsDeliverResourceUpdates() {
 		{ u"method"_q, u"subscriptions/listen"_q },
 		{ u"params"_q, QJsonObject{
 			{ u"notifications"_q, QJsonObject{
+				{ u"toolsListChanged"_q, true },
 				{ u"resourceSubscriptions"_q,
 					QJsonArray{ u"telegram://updates"_q } },
 			} },
@@ -916,6 +1273,9 @@ void TestHttpSubscriptionsDeliverResourceUpdates() {
 	Require(response.contains("Content-Type: text/event-stream"),
 		u"subscription did not use SSE"_q);
 	Require(response.indexOf("notifications/subscriptions/acknowledged")
+		< response.indexOf("notifications/tools/list_changed"),
+		u"tool list update arrived before acknowledgement"_q);
+	Require(response.indexOf("notifications/tools/list_changed")
 		< response.indexOf("notifications/resources/updated"),
 		u"subscription update arrived before acknowledgement"_q);
 	Require(response.count(
@@ -1216,6 +1576,7 @@ int main(int argc, char *argv[]) {
 	TestValidRequestParses();
 	TestMissingMetadataIsRejected();
 	TestClientInfoMetadataIsOptional();
+	TestCompatibilityRequestAllowsOmittedParams();
 	TestDiscoverResultAdvertisesCurrentProtocol();
 	TestHttpParserWaitsForCompleteBody();
 	TestHttpParserRejectsUnsupportedMethods();
@@ -1229,11 +1590,18 @@ int main(int argc, char *argv[]) {
 	TestDispatcherCancellationReachesTool();
 	TestDispatcherValidatesToolInputSchema();
 	TestDispatcherAllowsOmittedEmptyArguments();
+	TestAccessPolicyAppliesToolAndCategoryChoices();
+	TestAccessPolicyMigrationDefaults();
+	TestAccessPolicyNormalizesStoredTools();
+	TestDispatcherFiltersToolsAndCalls();
 	TestHttpServerSupportsCodexClient();
 	TestHttpServerValidatesNameHeader();
 	TestHttpServerReportsUnsupportedVersion();
+	TestHttpServerRequiresBearerToken();
 	TestHttpServerUses404ForUnknownRpcMethod();
 	TestHttpServerRebindIsAtomic();
+	TestHttpServerStopCancelsTool();
+	TestBearerRefreshDisconnectsSubscription();
 	TestHttpServerStreamsProgressOnMainThread();
 	TestHttpDisconnectCancelsTool();
 	TestHttpSubscriptionsDeliverResourceUpdates();

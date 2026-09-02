@@ -27,6 +27,8 @@ public:
 	~HttpServer();
 
 	[[nodiscard]] bool listen(quint16 port);
+	void stop();
+	void setBearerToken(QByteArray token);
 	[[nodiscard]] quint16 port() const;
 	[[nodiscard]] QString errorString() const;
 	void publish(QString method, QJsonObject params);
@@ -43,6 +45,7 @@ private:
 	Worker *_worker = nullptr;
 	QHash<quint64, std::shared_ptr<Cancellation>> _calls;
 	quint16 _port = 0;
+	QByteArray _bearerToken;
 	QString _errorString;
 
 };

@@ -38,6 +38,7 @@ constexpr auto kCallDeadline = 5 * 60 * crl::time(1000);
 	switch (status) {
 	case 200: return "200 OK";
 	case 202: return "202 Accepted";
+	case 401: return "401 Unauthorized";
 	case 400: return "400 Bad Request";
 	case 403: return "403 Forbidden";
 	case 404: return "404 Not Found";
@@ -50,6 +51,19 @@ constexpr auto kCallDeadline = 5 * 60 * crl::time(1000);
 	case 503: return "503 Service Unavailable";
 	}
 	return "500 Internal Server Error";
+}
+
+[[nodiscard]] bool SecureEqual(
+		const QByteArray &a,
+		const QByteArray &b) {
+	if (a.size() != b.size()) {
+		return false;
+	}
+	auto difference = uchar(0);
+	for (auto i = 0; i != a.size(); ++i) {
+		difference |= uchar(a[i]) ^ uchar(b[i]);
+	}
+	return difference == 0;
 }
 
 [[nodiscard]] QByteArray ErrorBody(
@@ -147,6 +161,16 @@ public:
 		return _errorString;
 	}
 
+	void stop() {
+		_server.reset();
+		closeClients();
+	}
+
+	void setBearerToken(QByteArray token) {
+		_bearerToken = std::move(token);
+		closeClients();
+	}
+
 	void complete(quint64 serial, QJsonObject response) {
 		for (auto i = _clients.begin(); i != _clients.end(); ++i) {
 			if (i->serial != serial) {
@@ -218,7 +242,11 @@ public:
 	}
 
 	void shutdown() {
-		_server.reset();
+		stop();
+	}
+
+private:
+	void closeClients() {
 		const auto sockets = _clients.keys();
 		for (const auto socket : sockets) {
 			const auto i = _clients.find(socket);
@@ -248,7 +276,6 @@ public:
 		_activeSubscriptions = 0;
 	}
 
-private:
 	struct Client {
 		QByteArray input;
 		quint64 serial = 0;
@@ -353,6 +380,34 @@ private:
 		i->reading = false;
 		if (i->readTimer) {
 			i->readTimer->stop();
+		}
+		if (!_bearerToken.isEmpty()) {
+			const auto authorization = parsed.request.headers.value(
+				"authorization");
+			const auto separator = authorization.indexOf(' ');
+			const auto scheme = authorization.left(separator);
+			const auto encoded = (separator > 0)
+				? authorization.mid(separator + 1).trimmed()
+				: QByteArray();
+			const auto decoded = QByteArray::fromBase64(
+				encoded,
+				QByteArray::Base64UrlEncoding
+					| QByteArray::AbortOnBase64DecodingErrors);
+			if (scheme.compare("Bearer", Qt::CaseInsensitive) != 0
+				|| !SecureEqual(decoded, _bearerToken)) {
+				auto challenge = QByteArray(
+					"WWW-Authenticate: Bearer realm=\"Forkgram MCP\"");
+				if (!authorization.isEmpty()) {
+					challenge += ", error=\"invalid_token\"";
+				}
+				writeHttp(
+					socket,
+					401,
+					"text/plain; charset=utf-8",
+					"Unauthorized",
+					challenge + "\r\n");
+				return;
+			}
 		}
 		const auto headerVersion = parsed.request.headers.value(
 			"mcp-protocol-version");
@@ -500,6 +555,25 @@ private:
 		}
 		const auto requested = value.toObject();
 		auto honored = QJsonObject();
+		for (const auto &key : {
+			u"toolsListChanged"_q,
+			u"resourcesListChanged"_q,
+		}) {
+			const auto flag = requested.value(key);
+			if (!flag.isUndefined() && !flag.isBool()) {
+				writeHttp(
+					socket,
+					400,
+					"application/json",
+					ErrorBody(
+						request.id,
+						-32602,
+						u"Invalid subscription filter"_q));
+				return;
+			} else if (flag.isBool()) {
+				honored.insert(key, flag);
+			}
+		}
 		const auto resources = requested.value(
 			u"resourceSubscriptions"_q);
 		if (!resources.isUndefined()) {
@@ -623,10 +697,12 @@ private:
 			QTcpSocket *socket,
 			int status,
 			const QByteArray &contentType,
-			const QByteArray &body) {
+			const QByteArray &body,
+			const QByteArray &extraHeaders = {}) {
 		const auto response = QByteArray("HTTP/1.1 ")
 			+ StatusText(status) + "\r\n"
 			+ "Content-Type: " + contentType + "\r\n"
+			+ extraHeaders
 			+ "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
 			+ "Connection: close\r\n\r\n"
 			+ body;
@@ -637,6 +713,7 @@ private:
 	const not_null<HttpServer*> _owner;
 	std::unique_ptr<QTcpServer> _server;
 	QHash<QTcpSocket*, Client> _clients;
+	QByteArray _bearerToken;
 	QString _errorString;
 	quint64 _nextSerial = 0;
 	int _activeCalls = 0;
@@ -659,11 +736,7 @@ HttpServer::HttpServer(Dispatcher *dispatcher)
 }
 
 HttpServer::~HttpServer() {
-	const auto calls = _calls;
-	_calls.clear();
-	for (const auto &cancellation : calls) {
-		cancellation->cancel();
-	}
+	stop();
 	if (_worker && _thread->isRunning()) {
 		QMetaObject::invokeMethod(
 			_worker,
@@ -696,6 +769,38 @@ bool HttpServer::listen(quint16 port) {
 		_port = actual;
 	}
 	return result;
+}
+
+void HttpServer::stop() {
+	const auto calls = _calls;
+	_calls.clear();
+	for (const auto &cancellation : calls) {
+		cancellation->cancel();
+	}
+	if (_worker && _thread->isRunning()) {
+		QMetaObject::invokeMethod(
+			_worker,
+			[worker = _worker] { worker->stop(); },
+			Qt::BlockingQueuedConnection);
+	}
+	_port = 0;
+}
+
+void HttpServer::setBearerToken(QByteArray token) {
+	const auto calls = _calls;
+	_calls.clear();
+	for (const auto &cancellation : calls) {
+		cancellation->cancel();
+	}
+	_bearerToken = token;
+	if (_worker && _thread->isRunning()) {
+		QMetaObject::invokeMethod(
+			_worker,
+			[worker = _worker, token = std::move(token)]() mutable {
+				worker->setBearerToken(std::move(token));
+			},
+			Qt::BlockingQueuedConnection);
+	}
 }
 
 quint16 HttpServer::port() const {

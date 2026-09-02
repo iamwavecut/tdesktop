@@ -13,10 +13,34 @@ init_target(test_mcp "(tests)")
 add_executable(test_mcp_conformance_server)
 init_target(test_mcp_conformance_server "(tests)")
 
+add_executable(test_fork_settings)
+init_target(test_fork_settings "(tests)")
+
+target_include_directories(test_fork_settings PRIVATE ${src_loc})
+
+nice_target_sources(test_fork_settings ${src_loc}
+PRIVATE
+    core/link_rewrite.cpp
+    core/link_rewrite.h
+    tests/test_fork_settings.cpp
+)
+
+target_link_libraries(test_fork_settings
+PRIVATE
+    desktop-app::lib_base
+    desktop-app::external_qt
+)
+
+set_target_properties(test_fork_settings PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_include_directories(test_mcp PRIVATE ${src_loc})
 
 nice_target_sources(test_mcp ${src_loc}
 PRIVATE
+    core/mcp/mcp_access_policy.cpp
+    core/mcp/mcp_access_policy.h
     core/mcp/mcp_dispatcher.cpp
     core/mcp/mcp_dispatcher.h
     core/mcp/mcp_http_parser.cpp

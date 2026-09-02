@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "api/api_editing.h"
 #include "apiwrap.h"
+#include "base/random.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/version.h"
@@ -60,8 +61,18 @@ namespace Core::Mcp {
 namespace {
 
 constexpr auto kPortKey = std::string_view("mcp.port");
+constexpr auto kEnabledKey = std::string_view("mcp.enabled");
+constexpr auto kAuthEnabledKey = std::string_view("mcp.auth.enabled");
+constexpr auto kAuthTokenKey = std::string_view("mcp.auth.token");
+constexpr auto kDisabledToolsKey = std::string_view("mcp.tools.disabled");
 constexpr auto kMinPort = 1024;
 constexpr auto kSessionWatchInterval = crl::time(100);
+
+[[nodiscard]] QByteArray GenerateBearerToken() {
+	auto result = QByteArray(32, '\0');
+	base::RandomFill(result.data(), result.size());
+	return result;
+}
 
 [[nodiscard]] QJsonObject EmptyObjectSchema() {
 	return {
@@ -84,6 +95,14 @@ constexpr auto kSessionWatchInterval = crl::time(100);
 				QJsonObject{ { u"type"_q, u"boolean"_q } } },
 			{ u"mcp_available"_q,
 				QJsonObject{ { u"type"_q, u"boolean"_q } } },
+			{ u"mcp_enabled"_q,
+				QJsonObject{ { u"type"_q, u"boolean"_q } } },
+			{ u"authentication_required"_q,
+				QJsonObject{ { u"type"_q, u"boolean"_q } } },
+			{ u"enabled_tool_count"_q,
+				QJsonObject{ { u"type"_q, u"integer"_q } } },
+			{ u"total_tool_count"_q,
+				QJsonObject{ { u"type"_q, u"integer"_q } } },
 			{ u"account_id"_q, QJsonObject{
 				{ u"type"_q, QJsonArray{ u"string"_q, u"null"_q } },
 			} },
@@ -94,6 +113,10 @@ constexpr auto kSessionWatchInterval = crl::time(100);
 			u"locked"_q,
 			u"authenticated"_q,
 			u"mcp_available"_q,
+			u"mcp_enabled"_q,
+			u"authentication_required"_q,
+			u"enabled_tool_count"_q,
+			u"total_tool_count"_q,
 			u"account_id"_q,
 			u"endpoint"_q,
 		} },
@@ -382,17 +405,56 @@ Service::Service(not_null<Application*> application)
 , _uiDriver(application, &_dispatcher)
 , _server(&_dispatcher) {
 	registerTools();
+	_dispatcher.setToolFilter([=](const QString &name) {
+		return !_accessPolicy || _accessPolicy->toolEnabled(name);
+	});
 	watchUpdates();
 }
 
 bool Service::start() {
 	auto savedOk = false;
-	auto saved = _application->settings().readPref<QByteArray>(
-		kPortKey).toInt(&savedOk);
+	const auto savedData = _application->settings().readPref<QByteArray>(
+		kPortKey);
+	auto saved = savedData.toInt(&savedOk);
 	if (!savedOk || (saved && (saved < kMinPort || saved > 65535))) {
 		saved = 0;
 	}
 	_configuredPort = saved;
+	const auto defaults = DefaultAccessPolicyState(saved > 0);
+	_accessPolicy = std::make_unique<AccessPolicy>(
+		_dispatcher.toolCatalog(),
+		AccessPolicyState{
+			.enabled = _application->settings().readPref<bool>(
+				kEnabledKey,
+				defaults.enabled),
+			.authenticationEnabled = _application->settings().readPref<bool>(
+				kAuthEnabledKey,
+				defaults.authenticationEnabled),
+			.bearerToken = _application->settings().readPref<QByteArray>(
+				kAuthTokenKey),
+			.disabledTools = _application->settings().readPref<QByteArray>(
+				kDisabledToolsKey),
+		});
+	_application->settings().writePref<bool>(
+		kEnabledKey,
+		_accessPolicy->enabled());
+	_application->settings().writePref<bool>(
+		kAuthEnabledKey,
+		_accessPolicy->authenticationEnabled());
+	if (_accessPolicy->authenticationEnabled()
+		&& _accessPolicy->bearerToken().size() != 32) {
+		_accessPolicy->setBearerToken(GenerateBearerToken());
+		_application->settings().writePref<QByteArray>(
+			kAuthTokenKey,
+			_accessPolicy->bearerToken());
+	}
+	_application->saveSettings();
+	_server.setBearerToken(_accessPolicy->authenticationEnabled()
+		? _accessPolicy->bearerToken()
+		: QByteArray());
+	if (!_accessPolicy->enabled()) {
+		return true;
+	}
 	if (!_server.listen(saved)) {
 		return false;
 	}
@@ -406,8 +468,50 @@ bool Service::start() {
 	return true;
 }
 
+bool Service::enabled() const {
+	return _accessPolicy && _accessPolicy->enabled();
+}
+
+bool Service::setEnabled(bool enabled) {
+	Expects(_accessPolicy != nullptr);
+
+	if (!enabled) {
+		_server.stop();
+		if (_accessPolicy->setEnabled(false)) {
+			_application->settings().writePref<bool>(kEnabledKey, false);
+			_application->saveSettings();
+			notifyConfigurationChanged();
+		}
+		return true;
+	} else if (available()) {
+		return true;
+	}
+	_server.setBearerToken(authenticationEnabled()
+		? _accessPolicy->bearerToken()
+		: QByteArray());
+	if (!_server.listen(_configuredPort)) {
+		return false;
+	}
+	_configuredPort = _server.port();
+	_application->settings().writePref<QByteArray>(
+		kPortKey,
+		QByteArray::number(_configuredPort));
+	if (_accessPolicy->setEnabled(true)) {
+		_application->settings().writePref<bool>(kEnabledKey, true);
+	}
+	_application->saveSettings();
+	notifyConfigurationChanged();
+	return true;
+}
+
 bool Service::rebind(quint16 port) {
-	if (port < kMinPort || !_server.listen(port)) {
+	if (port < kMinPort) {
+		return false;
+	}
+	if (port == _configuredPort && (!enabled() || available())) {
+		return true;
+	}
+	if (enabled() && !_server.listen(port)) {
 		return false;
 	}
 	_configuredPort = port;
@@ -415,7 +519,111 @@ bool Service::rebind(quint16 port) {
 		kPortKey,
 		QByteArray::number(port));
 	_application->saveSettings();
+	notifyConfigurationChanged();
 	return true;
+}
+
+bool Service::authenticationEnabled() const {
+	return _accessPolicy && _accessPolicy->authenticationEnabled();
+}
+
+void Service::setAuthenticationEnabled(bool enabled) {
+	Expects(_accessPolicy != nullptr);
+
+	if (!_accessPolicy->setAuthenticationEnabled(enabled)) {
+		return;
+	}
+	if (enabled && _accessPolicy->bearerToken().size() != 32) {
+		_accessPolicy->setBearerToken(GenerateBearerToken());
+		_application->settings().writePref<QByteArray>(
+			kAuthTokenKey,
+			_accessPolicy->bearerToken());
+	}
+	_server.setBearerToken(enabled
+		? _accessPolicy->bearerToken()
+		: QByteArray());
+	_application->settings().writePref<bool>(kAuthEnabledKey, enabled);
+	_application->saveSettings();
+	notifyConfigurationChanged();
+}
+
+QString Service::bearerTokenForCopy() const {
+	return _accessPolicy
+		? QString::fromLatin1(_accessPolicy->bearerToken().toBase64(
+			QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals))
+		: QString();
+}
+
+QString Service::regenerateBearerToken() {
+	Expects(_accessPolicy != nullptr);
+
+	auto token = GenerateBearerToken();
+	while (token == _accessPolicy->bearerToken()) {
+		token = GenerateBearerToken();
+	}
+	_accessPolicy->setBearerToken(token);
+	_application->settings().writePref<QByteArray>(kAuthTokenKey, token);
+	_server.setBearerToken(authenticationEnabled() ? token : QByteArray());
+	_application->saveSettings();
+	notifyConfigurationChanged();
+	return bearerTokenForCopy();
+}
+
+const std::vector<ToolInfo> &Service::tools() const {
+	Expects(_accessPolicy != nullptr);
+
+	return _accessPolicy->tools();
+}
+
+bool Service::toolEnabled(const QString &name) const {
+	return _accessPolicy && _accessPolicy->toolEnabled(name);
+}
+
+int Service::enabledToolCount() const {
+	return _accessPolicy ? _accessPolicy->enabledToolCount() : 0;
+}
+
+int Service::totalToolCount() const {
+	return _accessPolicy ? int(_accessPolicy->tools().size()) : 0;
+}
+
+ToolCategoryState Service::categoryState(const QString &category) const {
+	return _accessPolicy
+		? _accessPolicy->categoryState(category)
+		: ToolCategoryState::None;
+}
+
+void Service::setToolEnabled(const QString &name, bool enabled) {
+	Expects(_accessPolicy != nullptr);
+
+	if (_accessPolicy->setToolEnabled(name, enabled)) {
+		saveToolPolicy();
+	}
+}
+
+void Service::setCategoryEnabled(const QString &category, bool enabled) {
+	Expects(_accessPolicy != nullptr);
+
+	if (_accessPolicy->setCategoryEnabled(category, enabled)) {
+		saveToolPolicy();
+	}
+}
+
+rpl::producer<> Service::configurationChanges() const {
+	return _configurationChanges.events();
+}
+
+void Service::saveToolPolicy() {
+	_application->settings().writePref<QByteArray>(
+		kDisabledToolsKey,
+		_accessPolicy->serializedDisabledTools());
+	_application->saveSettings();
+	_server.publish(u"notifications/tools/list_changed"_q, {});
+	notifyConfigurationChanged();
+}
+
+void Service::notifyConfigurationChanged() {
+	_configurationChanges.fire({});
 }
 
 bool Service::available() const {
@@ -2620,6 +2828,10 @@ ToolResult Service::clientState() const {
 		{ u"locked"_q, _application->passcodeLocked() },
 		{ u"authenticated"_q, (session != nullptr) },
 		{ u"mcp_available"_q, available() },
+		{ u"mcp_enabled"_q, enabled() },
+		{ u"authentication_required"_q, authenticationEnabled() },
+		{ u"enabled_tool_count"_q, enabledToolCount() },
+		{ u"total_tool_count"_q, totalToolCount() },
 		{ u"endpoint"_q, endpoint() },
 	};
 	result.insert(

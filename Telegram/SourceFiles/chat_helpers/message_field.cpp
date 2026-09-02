@@ -68,7 +68,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
-#include <optional>
 
 namespace {
 
@@ -85,12 +84,6 @@ constexpr auto kLinkProtocols = {
 	"http://",
 	"https://",
 	"tonsite://"
-};
-
-struct ParsedLinkHost {
-	int start = 0;
-	int length = 0;
-	QString normalized;
 };
 
 // For mention / custom emoji tags save and validate selfId,
@@ -149,61 +142,10 @@ struct ParsedLinkHost {
 //		&& IsGoodProtocol(protocolMatch.captured(1));
 //}
 
-[[nodiscard]] bool LinkRewriteSupportedProtocol(QStringView protocol) {
-	return protocol.isEmpty()
-		|| (protocol.compare(u"http"_q, Qt::CaseInsensitive) == 0)
-		|| (protocol.compare(u"https"_q, Qt::CaseInsensitive) == 0);
-}
-
-[[nodiscard]] std::optional<ParsedLinkHost> ParseLinkHost(QStringView url) {
-	auto hostStart = 0;
-	if (const auto separator = url.indexOf(u"://"_q); separator > 0) {
-		if (!LinkRewriteSupportedProtocol(
-				base::StringViewMid(url, 0, separator))) {
-			return std::nullopt;
-		}
-		hostStart = separator + 3;
-	}
-	auto hostEnd = hostStart;
-	while (hostEnd < url.size()) {
-		switch (url[hostEnd].unicode()) {
-		case '/':
-		case ':':
-		case '?':
-		case '#':
-			goto parsed_host;
-		default:
-			++hostEnd;
-			break;
-		}
-	}
-parsed_host:
-	if (hostEnd <= hostStart) {
-		return std::nullopt;
-	}
-	const auto length = hostEnd - hostStart;
-	const auto normalized = Core::ForkSettings::NormalizeLinkRewriteHost(
-		base::StringViewMid(url, hostStart, length).toString());
-	return normalized.isEmpty()
-		? std::nullopt
-		: std::optional(ParsedLinkHost{ hostStart, length, normalized });
-}
-
 [[nodiscard]] QString RewriteMessageLink(QString url) {
-	if (url.isEmpty()) {
-		return url;
-	}
-	const auto parsed = ParseLinkHost(url);
-	if (!parsed) {
-		return url;
-	}
-	for (const auto &rule : Core::App().settings().fork().linkRewrites()) {
-		if (parsed->normalized == rule.sourceHost) {
-			url.replace(parsed->start, parsed->length, rule.targetHost);
-			break;
-		}
-	}
-	return url;
+	return Core::RewriteLink(
+		std::move(url),
+		Core::App().settings().fork().linkRewrites());
 }
 
 [[nodiscard]] std::vector<MessageLinkRange> ParseMessageLinksRanges(

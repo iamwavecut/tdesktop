@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "core/mcp/mcp_access_policy.h"
 #include "core/mcp/mcp_dispatcher.h"
 #include "core/mcp/mcp_http_server.h"
 #include "core/mcp/mcp_tl_registry.h"
@@ -36,7 +37,22 @@ public:
 	explicit Service(not_null<Application*> application);
 
 	[[nodiscard]] bool start();
+	[[nodiscard]] bool enabled() const;
+	[[nodiscard]] bool setEnabled(bool enabled);
 	[[nodiscard]] bool rebind(quint16 port);
+	[[nodiscard]] bool authenticationEnabled() const;
+	void setAuthenticationEnabled(bool enabled);
+	[[nodiscard]] QString bearerTokenForCopy() const;
+	[[nodiscard]] QString regenerateBearerToken();
+	[[nodiscard]] const std::vector<ToolInfo> &tools() const;
+	[[nodiscard]] bool toolEnabled(const QString &name) const;
+	[[nodiscard]] int enabledToolCount() const;
+	[[nodiscard]] int totalToolCount() const;
+	[[nodiscard]] ToolCategoryState categoryState(
+		const QString &category) const;
+	void setToolEnabled(const QString &name, bool enabled);
+	void setCategoryEnabled(const QString &category, bool enabled);
+	[[nodiscard]] rpl::producer<> configurationChanges() const;
 	[[nodiscard]] bool available() const;
 	[[nodiscard]] quint16 port() const;
 	[[nodiscard]] quint16 configuredPort() const;
@@ -59,6 +75,8 @@ private:
 	};
 
 	void registerTools();
+	void saveToolPolicy();
+	void notifyConfigurationChanged();
 	void watchUpdates();
 	void watchSession(Main::Session *session);
 	void pushUpdate(QString type, QJsonObject data);
@@ -80,6 +98,7 @@ private:
 	TlRegistry _tlRegistry;
 	TlCodec _tlCodec;
 	UiDriver _uiDriver;
+	std::unique_ptr<AccessPolicy> _accessPolicy;
 	quint16 _configuredPort = 0;
 	std::deque<UpdateEvent> _updates;
 	std::vector<UpdateWaiter> _updateWaiters;
@@ -87,6 +106,7 @@ private:
 	quint64 _nextWaiterId = 0;
 	rpl::lifetime _activeSessionLifetime;
 	rpl::lifetime _updatesLifetime;
+	rpl::event_stream<> _configurationChanges;
 	HttpServer _server;
 
 };

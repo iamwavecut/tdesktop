@@ -52,14 +52,13 @@ ParsedRequest ParseRequest(
 		|| (protocolVersion == kCompatibilityProtocolVersion);
 	const auto notification = id.isUndefined();
 	const auto paramsValue = object.value(u"params"_q);
-	const auto initialized = compatibility
-		&& notification
-		&& (method == u"notifications/initialized"_q);
+	const auto omittedCompatibilityParams = compatibility
+		&& paramsValue.isUndefined();
 	if ((!notification && !ValidId(id))
 		|| (notification
 			&& (!compatibility || !method.startsWith(u"notifications/"_q)))
 		|| (!paramsValue.isObject()
-			&& !(initialized && paramsValue.isUndefined()))) {
+			&& !omittedCompatibilityParams)) {
 		return Error(id, -32600, u"Invalid Request"_q);
 	}
 	const auto params = paramsValue.toObject();
@@ -115,7 +114,7 @@ QJsonObject DiscoverResult(const QString &name, const QString &version) {
 		} },
 		{ u"capabilities"_q, QJsonObject{
 			{ u"tools"_q, QJsonObject{
-				{ u"listChanged"_q, false },
+				{ u"listChanged"_q, true },
 			} },
 			{ u"resources"_q, QJsonObject{
 				{ u"listChanged"_q, false },
@@ -141,7 +140,7 @@ QJsonObject InitializeResult(const QString &name, const QString &version) {
 			QString::fromLatin1(kCompatibilityProtocolVersion) },
 		{ u"capabilities"_q, QJsonObject{
 			{ u"tools"_q, QJsonObject{
-				{ u"listChanged"_q, false },
+				{ u"listChanged"_q, true },
 			} },
 			{ u"resources"_q, QJsonObject{
 				{ u"listChanged"_q, false },

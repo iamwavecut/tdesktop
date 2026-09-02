@@ -65,6 +65,14 @@ struct Tool {
 	QString requiredClientCapability;
 };
 
+struct ToolInfo {
+	QString name;
+	QString category;
+	QString description;
+};
+
+using ToolFilter = std::function<bool(const QString&)>;
+
 using JsonCompletion = std::function<void(QJsonObject)>;
 using JsonHandler = std::function<void(const QJsonObject&, JsonCompletion)>;
 
@@ -111,6 +119,8 @@ public:
 	void addResourceTemplate(ResourceTemplate resourceTemplate);
 	void addPrompt(Prompt prompt);
 	void setCompletionHandler(JsonHandler handler);
+	void setToolFilter(ToolFilter filter);
+	[[nodiscard]] std::vector<ToolInfo> toolCatalog() const;
 	CancellationPtr handle(
 		const Request &request,
 		Completion done,
@@ -137,6 +147,7 @@ private:
 	std::vector<ResourceTemplate> _resourceTemplates;
 	std::vector<Prompt> _prompts;
 	JsonHandler _completionHandler;
+	ToolFilter _toolFilter;
 
 };
 

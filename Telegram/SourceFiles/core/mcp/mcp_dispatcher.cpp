@@ -62,6 +62,14 @@ namespace {
 	return u"null"_q;
 }
 
+[[nodiscard]] QString ToolCategory(const QString &name) {
+	const auto first = name.indexOf('.');
+	const auto second = name.indexOf('.', first + 1);
+	return (first > 0 && second > first + 1)
+		? name.mid(first + 1, second - first - 1)
+		: QString();
+}
+
 [[nodiscard]] bool MatchesType(
 		const QJsonValue &value,
 		const QString &type) {
@@ -285,6 +293,23 @@ void Dispatcher::setCompletionHandler(JsonHandler handler) {
 	_completionHandler = std::move(handler);
 }
 
+void Dispatcher::setToolFilter(ToolFilter filter) {
+	_toolFilter = std::move(filter);
+}
+
+std::vector<ToolInfo> Dispatcher::toolCatalog() const {
+	auto result = std::vector<ToolInfo>();
+	result.reserve(_tools.size());
+	for (const auto &tool : _tools) {
+		result.push_back({
+			.name = tool.name,
+			.category = ToolCategory(tool.name),
+			.description = tool.description,
+		});
+	}
+	return result;
+}
+
 CancellationPtr Dispatcher::handle(
 		const Request &request,
 		Completion done,
@@ -506,6 +531,9 @@ void Dispatcher::readResource(const Request &request, Completion done) const {
 QJsonObject Dispatcher::listTools(const Request &request) const {
 	auto tools = QJsonArray();
 	for (const auto &tool : _tools) {
+		if (_toolFilter && !_toolFilter(tool.name)) {
+			continue;
+		}
 		tools.append(QJsonObject{
 			{ u"name"_q, tool.name },
 			{ u"description"_q, tool.description },
@@ -545,6 +573,17 @@ void Dispatcher::callTool(
 			request.id,
 			-32602,
 			u"Unknown tool: "_q + name));
+		return;
+	}
+	if (_toolFilter && !_toolFilter(name)) {
+		done(Error(
+			request.id,
+			-32023,
+			u"Tool is disabled: "_q + name,
+			{
+				{ u"code"_q, u"TOOL_DISABLED"_q },
+				{ u"name"_q, name },
+			}));
 		return;
 	}
 	if (!i->handler && !i->cancellableHandler && !i->advancedHandler) {

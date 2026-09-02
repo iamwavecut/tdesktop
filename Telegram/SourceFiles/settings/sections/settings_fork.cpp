@@ -396,6 +396,35 @@ void TextValueBox::prepare() {
 	setDimensions(st::boxWidth, content->height());
 }
 
+struct LinkRewriteGroup {
+	std::vector<QString> sources;
+	QString target;
+};
+
+[[nodiscard]] QString LinkRewriteSourcesText(
+		const std::vector<QString> &sources) {
+	auto result = QStringList();
+	result.reserve(sources.size());
+	for (const auto &source : sources) {
+		result.push_back(source);
+	}
+	return result.join(QChar(u'\n'));
+}
+
+[[nodiscard]] std::vector<LinkRewriteGroup> GroupLinkRewrites(
+		const std::vector<Core::LinkRewriteRule> &rules) {
+	auto result = std::vector<LinkRewriteGroup>();
+	for (const auto &rule : rules) {
+		const auto i = ranges::find(result, rule.targetHost, &LinkRewriteGroup::target);
+		if (i == end(result)) {
+			result.push_back({ { rule.sourceHost }, rule.targetHost });
+		} else if (!ranges::contains(i->sources, rule.sourceHost)) {
+			i->sources.push_back(rule.sourceHost);
+		}
+	}
+	return result;
+}
+
 class LinkRewriteRulesBox final : public Ui::BoxContent, public base::has_weak_ptr {
 public:
 	LinkRewriteRulesBox(QWidget*, Fn<void()> saved);
@@ -406,17 +435,17 @@ protected:
 	void prepare() override;
 
 private:
-	struct RowState {
-		QPointer<Ui::InputField> source;
+	struct GroupState {
+		QPointer<Ui::InputField> sources;
 		QPointer<Ui::InputField> target;
 	};
 
-	[[nodiscard]] std::vector<Core::LinkRewriteRule> collectRules() const;
-	void rebuildRows(std::vector<Core::LinkRewriteRule> rules, int focusIndex);
+	[[nodiscard]] std::vector<LinkRewriteGroup> collectGroups() const;
+	void rebuildGroups(std::vector<LinkRewriteGroup> groups, int focusIndex);
 	void save();
 
-	QPointer<Ui::VerticalLayout> _rowsWrap;
-	std::vector<RowState> _rows;
+	QPointer<Ui::VerticalLayout> _groupsWrap;
+	std::vector<GroupState> _groups;
 	Fn<void()> _saved;
 	Fn<void()> _setInnerFocus;
 };
@@ -431,108 +460,133 @@ void LinkRewriteRulesBox::setInnerFocus() {
 	}
 }
 
-std::vector<Core::LinkRewriteRule> LinkRewriteRulesBox::collectRules() const {
-	auto result = std::vector<Core::LinkRewriteRule>();
-	result.reserve(_rows.size());
-	for (const auto &[source, target] : _rows) {
+std::vector<LinkRewriteGroup> LinkRewriteRulesBox::collectGroups() const {
+	auto result = std::vector<LinkRewriteGroup>();
+	result.reserve(_groups.size());
+	for (const auto &[sources, target] : _groups) {
+		auto values = std::vector<QString>();
+		if (sources) {
+			for (auto value : sources->getLastText().split(
+					QChar(u'\n'),
+					Qt::SkipEmptyParts)) {
+				values.push_back(value.trimmed());
+			}
+		}
 		result.push_back({
-			source ? source->getLastText() : QString(),
-			target ? target->getLastText() : QString(),
+			.sources = std::move(values),
+			.target = target ? target->getLastText() : QString(),
 		});
 	}
 	return result;
 }
 
-void LinkRewriteRulesBox::rebuildRows(
-		std::vector<Core::LinkRewriteRule> rules,
+void LinkRewriteRulesBox::rebuildGroups(
+		std::vector<LinkRewriteGroup> groups,
 		int focusIndex) {
-	_rows.clear();
-	while (_rowsWrap->count()) {
-		delete _rowsWrap->widgetAt(0);
+	_groups.clear();
+	while (_groupsWrap->count()) {
+		delete _groupsWrap->widgetAt(0);
 	}
-	for (auto i = 0, count = int(rules.size()); i != count; ++i) {
-		const auto wrap = _rowsWrap->add(object_ptr<Ui::VerticalLayout>(
-			_rowsWrap));
-		const auto source = wrap->add(
+	for (auto i = 0, count = int(groups.size()); i != count; ++i) {
+		const auto wrap = _groupsWrap->add(object_ptr<Ui::VerticalLayout>(
+			_groupsWrap));
+		Ui::AddSubsectionTitle(
+			wrap,
+			rpl::single(u"Rewrite %1"_q.arg(i + 1)));
+		const auto sources = wrap->add(
 			object_ptr<Ui::InputField>(
 				wrap,
 				st::defaultInputField,
-				rpl::single(u"Original host"_q),
-				rules[i].sourceHost),
+				Ui::InputField::Mode::MultiLine,
+				rpl::single(u"Source URL prefixes — one per line"_q),
+				LinkRewriteSourcesText(groups[i].sources)),
 			st::markdownLinkFieldPadding);
+		sources->setMinHeight(st::defaultInputField.heightMin * 2);
+		sources->setMaxHeight(st::defaultInputField.heightMin * 4);
 		const auto target = wrap->add(
 			object_ptr<Ui::InputField>(
 				wrap,
 				st::defaultInputField,
-				rpl::single(u"Replacement host"_q),
-				rules[i].targetHost),
+				rpl::single(u"Replacement URL prefix"_q),
+				groups[i].target),
 			st::markdownLinkFieldPadding);
 		AddButtonWithIcon(
 			wrap,
-			rpl::single(u"Remove rule"_q),
-			st::settingsButtonNoIcon,
+			rpl::single(u"Remove rewrite"_q),
+			st::settingsAttentionButtonWithIcon,
 			{ &st::menuIconDeleteAttention })->setClickedCallback([=] {
-			auto current = collectRules();
+			auto current = collectGroups();
 			if (i >= 0 && i < int(current.size())) {
 				current.erase(begin(current) + i);
 			}
-			rebuildRows(std::move(current), std::max(0, i - 1));
+			rebuildGroups(std::move(current), std::max(0, i - 1));
 		});
 		Ui::AddSkip(wrap);
 		Ui::AddDivider(wrap);
 		Ui::AddSkip(wrap);
-		_rows.push_back({ source, target });
+		_groups.push_back({ sources, target });
 	}
-	if (!_rows.empty()) {
+	if (!_groups.empty()) {
 		_setInnerFocus = [=] {
-			const auto index = std::clamp(focusIndex, 0, int(_rows.size()) - 1);
-			if (const auto input = _rows[index].source.data()) {
+			const auto index = std::clamp(focusIndex, 0, int(_groups.size()) - 1);
+			if (const auto input = _groups[index].sources.data()) {
 				input->setFocusFast();
 			}
 		};
 	} else {
 		_setInnerFocus = nullptr;
 	}
-	_rowsWrap->resizeToWidth(width());
+	_groupsWrap->resizeToWidth(width());
 }
 
 void LinkRewriteRulesBox::save() {
-	auto raw = collectRules();
+	auto raw = collectGroups();
 	auto rules = std::vector<Core::LinkRewriteRule>();
-	rules.reserve(raw.size());
 	auto sourceErrors = std::vector<int>();
 	auto targetErrors = std::vector<int>();
+	auto sourceTargets = QHash<QString, QString>();
 	for (auto i = 0, count = int(raw.size()); i != count; ++i) {
-		auto source = Core::ForkSettings::NormalizeLinkRewriteHost(
-			raw[i].sourceHost);
-		auto target = Core::ForkSettings::NormalizeLinkRewriteHost(
-			raw[i].targetHost);
-		const auto emptySource = raw[i].sourceHost.trimmed().isEmpty();
-		const auto emptyTarget = raw[i].targetHost.trimmed().isEmpty();
-		if (emptySource && emptyTarget) {
+		auto target = Core::NormalizeLinkRewritePrefix(
+			raw[i].target);
+		if (raw[i].sources.empty() && raw[i].target.trimmed().isEmpty()) {
 			continue;
 		}
-		if (source.isEmpty()) {
+		if (raw[i].sources.empty()) {
 			sourceErrors.push_back(i);
 		}
 		if (target.isEmpty()) {
 			targetErrors.push_back(i);
 		}
-		if (!source.isEmpty() && !target.isEmpty()) {
-			rules.push_back({ std::move(source), std::move(target) });
+		for (const auto &value : raw[i].sources) {
+			auto source = Core::NormalizeLinkRewritePrefix(value);
+			if (source.isEmpty()) {
+				sourceErrors.push_back(i);
+				continue;
+			}
+			const auto existing = sourceTargets.constFind(source);
+			if (existing != sourceTargets.cend()) {
+				if (*existing != target) {
+					sourceErrors.push_back(i);
+				}
+				continue;
+			}
+			sourceTargets.insert(source, target);
+			if (!target.isEmpty()) {
+				rules.push_back({ std::move(source), target });
+			}
 		}
 	}
 	if (!sourceErrors.empty() || !targetErrors.empty()) {
 		for (const auto index : sourceErrors) {
-			if (index >= 0 && index < int(_rows.size())) {
-				if (const auto input = _rows[index].source.data()) {
+			if (index >= 0 && index < int(_groups.size())) {
+				if (const auto input = _groups[index].sources.data()) {
 					input->showError();
 				}
 			}
 		}
 		for (const auto index : targetErrors) {
-			if (index >= 0 && index < int(_rows.size())) {
-				if (const auto input = _rows[index].target.data()) {
+			if (index >= 0 && index < int(_groups.size())) {
+				if (const auto input = _groups[index].target.data()) {
 					input->showError();
 				}
 			}
@@ -548,18 +602,25 @@ void LinkRewriteRulesBox::save() {
 }
 
 void LinkRewriteRulesBox::prepare() {
-	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-	_rowsWrap = content->add(object_ptr<Ui::VerticalLayout>(content));
-	rebuildRows(Core::App().settings().fork().linkRewrites(), 0);
+	auto contentOwned = object_ptr<Ui::VerticalLayout>(this);
+	const auto content = contentOwned.data();
+	Ui::AddDividerText(
+		content,
+		rpl::single(
+			u"Enter hosts or host/path prefixes without http://. "
+			u"The unmatched path, query and fragment are preserved."_q));
+	_groupsWrap = content->add(object_ptr<Ui::VerticalLayout>(content));
+	rebuildGroups(GroupLinkRewrites(
+		Core::App().settings().fork().linkRewrites()), 0);
 	AddButtonWithIcon(
 		content,
-		rpl::single(u"Add rule"_q),
-		st::settingsButtonNoIcon,
+		rpl::single(u"Add rewrite"_q),
+		st::settingsButtonActive,
 		{ &st::settingsIconAdd, IconType::Round, &st::windowBgActive }
 	)->setClickedCallback([=] {
-		auto rules = collectRules();
-		rules.push_back({});
-		rebuildRows(std::move(rules), _rows.size());
+		auto groups = collectGroups();
+		groups.push_back({});
+		rebuildGroups(std::move(groups), _groups.size());
 		setInnerFocus();
 	});
 
@@ -570,7 +631,9 @@ void LinkRewriteRulesBox::prepare() {
 	addButton(tr::lng_cancel(), [=] {
 		closeBox();
 	});
-	setDimensionsToContent(st::boxWideWidth, content);
+	content->resizeToWidth(st::boxWideWidth);
+	setInnerWidget(std::move(contentOwned));
+	setDimensions(st::boxWideWidth, st::boxMaxListHeight, true);
 }
 
 [[nodiscard]] bool InvalidSummaryApiBaseUrl(QString value) {
@@ -588,30 +651,123 @@ void LinkRewriteRulesBox::prepare() {
 	return value.trimmed().isEmpty();
 }
 
-[[nodiscard]] QString SummaryApiBaseUrlLabel() {
-	const auto value = Core::App().settings().fork().summaryApiBaseUrl();
-	return value.isEmpty() ? u"Not set"_q : value;
-}
-
-[[nodiscard]] QString SummaryApiKeyLabel() {
-	return Core::App().settings().fork().summaryApiKey().isEmpty()
-		? u"Optional"_q
+[[nodiscard]] QString SummaryOverviewText() {
+	const auto &settings = Core::App().settings().fork();
+	return settings.summaryApiBaseUrl().isEmpty()
+		|| settings.summaryModel().isEmpty()
+		? u"Incomplete"_q
 		: u"Configured"_q;
 }
 
-[[nodiscard]] QString SummaryModelLabel() {
-	const auto value = Core::App().settings().fork().summaryModel();
-	return value.isEmpty() ? u"Not set"_q : value;
-}
+class SummarizationSettingsBox final
+	: public Ui::BoxContent
+	, public base::has_weak_ptr {
+public:
+	SummarizationSettingsBox(QWidget*, Fn<void()> saved)
+	: _saved(std::move(saved)) {
+	}
+
+	void setInnerFocus() override {
+		if (_baseUrl) {
+			_baseUrl->setFocusFast();
+		}
+	}
+
+protected:
+	void prepare() override {
+		const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+		const auto &settings = Core::App().settings().fork();
+		_baseUrl = content->add(
+			object_ptr<Ui::InputField>(
+				content,
+				st::defaultInputField,
+				rpl::single(u"Provider base URL including /v1"_q),
+				settings.summaryApiBaseUrl()),
+			st::markdownLinkFieldPadding);
+
+		auto passwordWrap = object_ptr<Ui::RpWidget>(content);
+		const auto raw = passwordWrap.data();
+		_apiKey = Ui::CreateChild<Ui::PasswordInput>(
+			raw,
+			st::defaultInputField,
+			rpl::single(u"API key — optional"_q),
+			settings.summaryApiKey());
+		raw->resize(raw->width(), _apiKey->height());
+		raw->geometryValue(
+		) | rpl::on_next([=](const QRect &geometry) {
+			_apiKey->resize(geometry.width(), _apiKey->height());
+			_apiKey->moveToLeft(0, 0);
+			raw->resize(geometry.width(), _apiKey->height());
+		}, raw->lifetime());
+		content->add(std::move(passwordWrap), st::markdownLinkFieldPadding);
+
+		_model = content->add(
+			object_ptr<Ui::InputField>(
+				content,
+				st::defaultInputField,
+				rpl::single(u"Model name"_q),
+				settings.summaryModel()),
+			st::markdownLinkFieldPadding);
+		Ui::AddDividerText(
+			content,
+			rpl::single(
+				u"The API key stays in local Forkgram settings."_q));
+
+		const auto save = [=] {
+			const auto baseUrl = _baseUrl->getLastText().trimmed();
+			const auto model = _model->getLastText().trimmed();
+			if (InvalidSummaryApiBaseUrl(baseUrl)) {
+				_baseUrl->showError();
+				return;
+			} else if (InvalidSummaryModel(model)) {
+				_model->showError();
+				return;
+			}
+			const auto weak = base::make_weak(this);
+			auto &settings = Core::App().settings().fork();
+			settings.setSummaryApiBaseUrl(qthelp::validate_url(baseUrl));
+			settings.setSummaryApiKey(_apiKey->getLastText().trimmed());
+			settings.setSummaryModel(model);
+			Core::App().saveSettings();
+			if (_saved) {
+				_saved();
+			}
+			if (weak) {
+				closeBox();
+			}
+		};
+		_baseUrl->submits(
+		) | rpl::on_next([=] { _apiKey->setFocusFast(); }, _baseUrl->lifetime());
+		QObject::connect(
+			_apiKey,
+			&Ui::MaskedInputField::submitted,
+			[=] { _model->setFocusFast(); });
+		_model->submits(
+		) | rpl::on_next([=] { save(); }, _model->lifetime());
+
+		setTitle(rpl::single(u"Summarization"_q));
+		addButton(tr::lng_settings_save(), save);
+		addButton(tr::lng_cancel(), [=] { closeBox(); });
+		content->moveToLeft(0, 0);
+		setDimensionsToContent(st::boxWidth, content);
+	}
+
+private:
+	QPointer<Ui::InputField> _baseUrl;
+	QPointer<Ui::PasswordInput> _apiKey;
+	QPointer<Ui::InputField> _model;
+	Fn<void()> _saved;
+};
 
 [[nodiscard]] QString LinkRewriteRulesLabel() {
-	const auto count = Core::App().settings().fork().linkRewrites().size();
+	const auto count = GroupLinkRewrites(
+		Core::App().settings().fork().linkRewrites()).size();
 	if (!count) {
 		return u"Disabled"_q;
 	}
 	return (count == 1)
-		? u"1 rule"_q
-		: u"%1 rules"_q.arg(count);
+		? u"1 rewrite"_q
+		: u"%1 rewrites"_q.arg(count);
 }
 
 //////
@@ -677,6 +833,213 @@ void MarkdownClipboardTextBox::prepare() {
 
 //////
 
+[[nodiscard]] rpl::producer<QString> McpTextValue(Fn<QString()> value) {
+	return rpl::single(rpl::empty) | rpl::then(
+		Core::App().mcp().configurationChanges()
+	) | rpl::map([value = std::move(value)] {
+		return value();
+	});
+}
+
+[[nodiscard]] rpl::producer<bool> McpBoolValue(Fn<bool()> value) {
+	return rpl::single(rpl::empty) | rpl::then(
+		Core::App().mcp().configurationChanges()
+	) | rpl::map([value = std::move(value)] {
+		return value();
+	});
+}
+
+[[nodiscard]] QString McpStatusText() {
+	const auto &service = Core::App().mcp();
+	return !service.enabled()
+		? tr::lng_settings_mcp_status_disabled(tr::now)
+		: service.available()
+		? tr::lng_settings_mcp_status_listening(tr::now)
+		: tr::lng_settings_mcp_unavailable(tr::now);
+}
+
+[[nodiscard]] QString McpEndpointText() {
+	const auto endpoint = Core::App().mcp().endpoint();
+	return endpoint.isEmpty()
+		? tr::lng_settings_mcp_endpoint_unassigned(tr::now)
+		: endpoint;
+}
+
+[[nodiscard]] QString McpTokenText() {
+	const auto &service = Core::App().mcp();
+	if (!service.authenticationEnabled()) {
+		return tr::lng_settings_mcp_token_disabled(tr::now);
+	}
+	const auto token = service.bearerTokenForCopy();
+	return token.isEmpty() ? QString() : (u"••••••••"_q + token.right(4));
+}
+
+[[nodiscard]] QString McpToolsCountText() {
+	const auto &service = Core::App().mcp();
+	return u"%1 / %2"_q.arg(
+		service.enabledToolCount()
+	).arg(
+		service.totalToolCount());
+}
+
+[[nodiscard]] QString McpCategoryTitle(const QString &category) {
+	if (category == u"client"_q) {
+		return tr::lng_settings_mcp_category_client(tr::now);
+	} else if (category == u"peers"_q) {
+		return tr::lng_settings_mcp_category_peers(tr::now);
+	} else if (category == u"chats"_q) {
+		return tr::lng_settings_mcp_category_chats(tr::now);
+	} else if (category == u"messages"_q) {
+		return tr::lng_settings_mcp_category_messages(tr::now);
+	} else if (category == u"files"_q) {
+		return tr::lng_settings_mcp_category_files(tr::now);
+	} else if (category == u"contacts"_q) {
+		return tr::lng_settings_mcp_category_contacts(tr::now);
+	} else if (category == u"members"_q) {
+		return tr::lng_settings_mcp_category_members(tr::now);
+	} else if (category == u"rights"_q) {
+		return tr::lng_settings_mcp_category_rights(tr::now);
+	} else if (category == u"settings"_q) {
+		return tr::lng_settings_mcp_category_settings(tr::now);
+	} else if (category == u"updates"_q) {
+		return tr::lng_settings_mcp_category_updates(tr::now);
+	} else if (category == u"raw"_q) {
+		return tr::lng_settings_mcp_category_raw(tr::now);
+	} else if (category == u"ui"_q) {
+		return tr::lng_settings_mcp_category_ui(tr::now);
+	}
+	return category;
+}
+
+[[nodiscard]] QString McpCategoryCountText(const QString &category) {
+	const auto &service = Core::App().mcp();
+	auto enabled = 0;
+	auto total = 0;
+	for (const auto &tool : service.tools()) {
+		if (tool.category == category) {
+			++total;
+			if (service.toolEnabled(tool.name)) {
+				++enabled;
+			}
+		}
+	}
+	return u"%1 / %2"_q.arg(enabled).arg(total);
+}
+
+class McpToolCategoryBox final : public Ui::BoxContent {
+public:
+	McpToolCategoryBox(QWidget*, QString category)
+	: _category(std::move(category)) {
+	}
+
+protected:
+	void prepare() override {
+		setTitle(McpCategoryTitle(_category));
+		addButton(tr::lng_close(), [=] { closeBox(); });
+
+		auto contentOwned = object_ptr<Ui::VerticalLayout>(this);
+		const auto content = contentOwned.data();
+		const auto service = &Core::App().mcp();
+		Ui::AddDividerText(
+			content,
+			McpTextValue([=] {
+				return McpCategoryCountText(_category) + u" tools enabled"_q;
+			}));
+		const auto all = content->add(object_ptr<Ui::SettingsButton>(
+			content,
+			tr::lng_settings_mcp_category_all(),
+			st::settingsButtonNoIcon));
+		all->toggleOn(McpBoolValue([=] {
+			return service->categoryState(_category)
+				== Core::Mcp::ToolCategoryState::All;
+		}));
+		all->toggledChanges(
+		) | rpl::filter([=](bool enabled) {
+			return enabled != (service->categoryState(_category)
+				== Core::Mcp::ToolCategoryState::All);
+		}) | rpl::on_next([=](bool enabled) {
+			service->setCategoryEnabled(_category, enabled);
+		}, all->lifetime());
+		Ui::AddDivider(content);
+
+		for (const auto &tool : service->tools()) {
+			if (tool.category != _category) {
+				continue;
+			}
+			const auto name = tool.name;
+			const auto button = content->add(object_ptr<Ui::SettingsButton>(
+				content,
+				rpl::single(name),
+				st::settingsButtonNoIcon));
+			button->toggleOn(McpBoolValue([=] {
+				return service->toolEnabled(name);
+			}));
+			button->toggledChanges(
+			) | rpl::filter([=](bool enabled) {
+				return enabled != service->toolEnabled(name);
+			}) | rpl::on_next([=](bool enabled) {
+				service->setToolEnabled(name, enabled);
+			}, button->lifetime());
+		}
+		content->resizeToWidth(st::boxWideWidth);
+		setInnerWidget(std::move(contentOwned));
+		setDimensions(st::boxWideWidth, st::boxMaxListHeight, true);
+	}
+
+private:
+	const QString _category;
+};
+
+class McpToolsBox final : public Ui::BoxContent {
+public:
+	explicit McpToolsBox(QWidget*) {
+	}
+
+protected:
+	void prepare() override {
+		setTitle(tr::lng_settings_mcp_tools());
+		addButton(tr::lng_close(), [=] { closeBox(); });
+
+		auto contentOwned = object_ptr<Ui::VerticalLayout>(this);
+		const auto content = contentOwned.data();
+		Ui::AddDividerText(
+			content,
+			rpl::single(
+				u"Choose a category to manage its tools. Disable Raw API "
+				u"and UI automation to block fallback access."_q));
+		for (const auto &category : {
+			u"client"_q,
+			u"peers"_q,
+			u"chats"_q,
+			u"messages"_q,
+			u"files"_q,
+			u"contacts"_q,
+			u"members"_q,
+			u"rights"_q,
+			u"settings"_q,
+			u"updates"_q,
+			u"raw"_q,
+			u"ui"_q,
+		}) {
+			const auto header = AddButtonWithLabel(
+				content,
+				rpl::single(McpCategoryTitle(category)),
+				McpTextValue([=] {
+					return McpCategoryCountText(category) + u"  ›"_q;
+				}),
+				st::settingsButtonNoIcon);
+			header->setClickedCallback([=] {
+				uiShow()->showBox(Box<McpToolCategoryBox>(category));
+			});
+		}
+		content->resizeToWidth(st::boxWidth);
+		setInnerWidget(std::move(contentOwned));
+		setDimensions(st::boxWidth, st::boxMaxListHeight, true);
+	}
+};
+
+//////
+
 using namespace Builder;
 
 [[nodiscard]] std::optional<quint16> ParseMcpPort(QString value) {
@@ -687,21 +1050,174 @@ using namespace Builder;
 		: std::nullopt;
 }
 
+[[nodiscard]] QString McpOverviewText() {
+	return McpStatusText() + u" · "_q + McpToolsCountText();
+}
+
+[[nodiscard]] QString McpStatusDetails() {
+	return tr::lng_settings_mcp_status(tr::now)
+		+ u": "_q
+		+ McpStatusText()
+		+ u"\n"_q
+		+ tr::lng_settings_mcp_endpoint(tr::now)
+		+ u": "_q
+		+ McpEndpointText();
+}
+
+class McpSettingsBox final : public Ui::BoxContent {
+public:
+	explicit McpSettingsBox(QWidget*) {
+	}
+
+protected:
+	void prepare() override {
+		setTitle(tr::lng_settings_mcp_title());
+		addButton(tr::lng_close(), [=] { closeBox(); });
+
+		auto contentOwned = object_ptr<Ui::VerticalLayout>(this);
+		const auto content = contentOwned.data();
+		const auto service = &Core::App().mcp();
+		const auto enabledState = std::make_shared<rpl::variable<bool>>(
+			service->enabled());
+		const auto enabled = content->add(object_ptr<Ui::SettingsButton>(
+			content,
+			tr::lng_settings_mcp_enable(),
+			st::settingsButtonNoIcon));
+		enabled->toggleOn(enabledState->value());
+		enabled->toggledChanges(
+		) | rpl::filter([=](bool value) {
+			return value != service->enabled();
+		}) | rpl::on_next([=](bool value) {
+			if (!service->setEnabled(value)) {
+				enabledState->force_assign(service->enabled());
+				uiShow()->showBox(Ui::MakeInformBox(
+					tr::lng_settings_mcp_bind_failed(
+						tr::now,
+						lt_error,
+						service->errorString())));
+			}
+		}, enabled->lifetime());
+		service->configurationChanges(
+		) | rpl::on_next([=] {
+			enabledState->force_assign(service->enabled());
+		}, enabled->lifetime());
+
+		Ui::AddDividerText(
+			content,
+			McpTextValue([] { return McpStatusDetails(); }));
+		const auto port = AddButtonWithLabel(
+			content,
+			tr::lng_settings_mcp_port(),
+			McpTextValue([] {
+				const auto value = Core::App().mcp().configuredPort();
+				return value ? QString::number(value) + u"  ›"_q : u"›"_q;
+			}),
+			st::settingsButton,
+			{ &st::menuIconNetwork });
+		port->setClickedCallback([=] {
+			uiShow()->showBox(Box<TextValueBox>(
+				tr::lng_settings_mcp_port(tr::now),
+				tr::lng_settings_mcp_port_placeholder(tr::now),
+				[] {
+					return QString::number(
+						Core::App().mcp().configuredPort());
+				},
+				[](QString value) {
+					const auto port = ParseMcpPort(std::move(value));
+					return port && Core::App().mcp().rebind(*port);
+				},
+				[](QString value) {
+					return !ParseMcpPort(std::move(value));
+				}));
+		});
+		const auto endpoint = AddButtonWithLabel(
+			content,
+			tr::lng_settings_mcp_endpoint(),
+			McpTextValue([] { return McpEndpointText(); }),
+			st::settingsButton,
+			{ &st::menuIconCopy });
+		endpoint->setClickedCallback([=] {
+			if (!service->endpoint().isEmpty()) {
+				QGuiApplication::clipboard()->setText(service->endpoint());
+			}
+		});
+
+		Ui::AddDivider(content);
+		const auto auth = content->add(object_ptr<Ui::SettingsButton>(
+			content,
+			tr::lng_settings_mcp_auth(),
+			st::settingsButtonNoIcon));
+		auth->toggleOn(McpBoolValue([=] {
+			return service->authenticationEnabled();
+		}));
+		auth->toggledChanges(
+		) | rpl::filter([=](bool value) {
+			return value != service->authenticationEnabled();
+		}) | rpl::on_next([=](bool value) {
+			service->setAuthenticationEnabled(value);
+		}, auth->lifetime());
+		auto authDetailsOwned = object_ptr<Ui::VerticalLayout>(content);
+		const auto authDetails = authDetailsOwned.data();
+		const auto token = AddButtonWithLabel(
+			authDetails,
+			tr::lng_settings_mcp_token(),
+			McpTextValue([] { return McpTokenText(); }),
+			st::settingsButton,
+			{ &st::menuIconCopy });
+		token->setClickedCallback([=] {
+			const auto value = service->bearerTokenForCopy();
+			if (service->authenticationEnabled() && !value.isEmpty()) {
+				QGuiApplication::clipboard()->setText(value);
+			}
+		});
+		AddButtonWithIcon(
+			authDetails,
+			tr::lng_settings_mcp_regenerate_token(),
+			st::settingsButton,
+			{ &st::menuIconSettings }
+		)->setClickedCallback([=] {
+			uiShow()->showBox(Ui::MakeConfirmBox({
+				.text = tr::lng_settings_mcp_regenerate_confirm(tr::now),
+				.confirmed = [=] {
+					QGuiApplication::clipboard()->setText(
+						service->regenerateBearerToken());
+				},
+				.confirmText = tr::lng_settings_mcp_regenerate_token(tr::now),
+			}));
+		});
+		const auto authDetailsWrap = content->add(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				content,
+				std::move(authDetailsOwned)));
+		authDetailsWrap->toggleOn(McpBoolValue([=] {
+			return service->authenticationEnabled();
+		}), anim::type::instant);
+
+		Ui::AddDivider(content);
+		const auto tools = AddButtonWithLabel(
+			content,
+			tr::lng_settings_mcp_tools(),
+			McpTextValue([] { return McpToolsCountText() + u"  ›"_q; }),
+			st::settingsButton,
+			{ &st::menuIconShowInChat });
+		tools->setClickedCallback([=] {
+			uiShow()->showBox(Box<McpToolsBox>());
+		});
+
+		content->resizeToWidth(st::boxWideWidth);
+		setInnerWidget(std::move(contentOwned));
+		setDimensions(st::boxWideWidth, st::boxMaxListHeight, true);
+	}
+};
+
 void BuildForkSectionContent(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	struct State {
 		rpl::variable<bool> checked;
 	};
 	struct SummaryLabels {
-		rpl::variable<QString> baseUrl = SummaryApiBaseUrlLabel();
-		rpl::variable<QString> apiKey = SummaryApiKeyLabel();
-		rpl::variable<QString> model = SummaryModelLabel();
+		rpl::variable<QString> summarization = SummaryOverviewText();
 		rpl::variable<QString> linkRewrites = LinkRewriteRulesLabel();
-		rpl::variable<QString> mcpPort = QString::number(
-			Core::App().mcp().configuredPort());
-		rpl::variable<QString> mcpEndpoint = Core::App().mcp().available()
-			? Core::App().mcp().endpoint()
-			: tr::lng_settings_mcp_unavailable(tr::now);
 	};
 	const auto summaryLabels = std::make_shared<SummaryLabels>();
 
@@ -1070,130 +1586,38 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 	builder.addDivider();
 	builder.addSkip();
 
-	builder.addSubsectionTitle(tr::lng_settings_mcp_title());
+	builder.addSubsectionTitle(rpl::single(u"Integrations"_q));
 	builder.addButton({
-		.id = u"fork/mcp/port"_q,
-		.title = tr::lng_settings_mcp_port(),
+		.id = u"fork/mcp"_q,
+		.title = tr::lng_settings_mcp_title(),
 		.st = &st::settingsButton,
 		.icon = { &st::menuIconNetwork },
-		.label = summaryLabels->mcpPort.value(),
-		.onClick = [=] {
-			controller->show(Box<TextValueBox>(
-				tr::lng_settings_mcp_port(tr::now),
-				tr::lng_settings_mcp_port_placeholder(tr::now),
-				[] {
-					return QString::number(
-						Core::App().mcp().configuredPort());
-				},
-				[=](QString value) {
-					const auto port = ParseMcpPort(std::move(value));
-					if (!port || !Core::App().mcp().rebind(*port)) {
-						return false;
-					}
-					summaryLabels->mcpPort = QString::number(*port);
-					summaryLabels->mcpEndpoint = Core::App().mcp().endpoint();
-					return true;
-				},
-				[](QString value) {
-					return !ParseMcpPort(std::move(value));
-				}));
-		},
-		.keywords = { u"mcp"_q, u"server"_q, u"port"_q },
-	});
-	builder.addButton({
-		.id = u"fork/mcp/endpoint"_q,
-		.title = tr::lng_settings_mcp_endpoint(),
-		.st = &st::settingsButton,
-		.icon = { &st::menuIconCopy },
-		.label = summaryLabels->mcpEndpoint.value(),
-		.onClick = [=] {
-			if (Core::App().mcp().available()) {
-				QGuiApplication::clipboard()->setText(
-					Core::App().mcp().endpoint());
-			}
-		},
-		.keywords = { u"mcp"_q, u"endpoint"_q, u"http"_q },
-	});
-
-	builder.addSkip();
-	builder.addDivider();
-	builder.addSkip();
-
-	builder.addSubsectionTitle(rpl::single(u"Summarization"_q));
-	builder.addButton({
-		.id = u"fork/summarization/base_url"_q,
-		.title = rpl::single(u"Provider base URL"_q),
-		.st = &st::settingsButton,
-		.icon = { &st::menuIconNetwork },
-		.label = summaryLabels->baseUrl.value(),
-		.onClick = [=] {
-			controller->show(Box<TextValueBox>(
-				u"Summarization provider"_q,
-				u"Base URL including /v1"_q,
-				[] { return Core::App().settings().fork().summaryApiBaseUrl(); },
-					[=](QString value) {
-						const auto validated = qthelp::validate_url(value.trimmed());
-						Core::App().settings().fork().setSummaryApiBaseUrl(validated);
-						summaryLabels->baseUrl = SummaryApiBaseUrlLabel();
-						return true;
-					},
-				[](QString value) { return InvalidSummaryApiBaseUrl(value); }));
-		},
+		.label = McpTextValue([] { return McpOverviewText() + u"  ›"_q; }),
+		.onClick = [=] { controller->show(Box<McpSettingsBox>()); },
 		.keywords = {
-			u"summarization"_q,
-			u"summary"_q,
-			u"provider"_q,
-			u"base"_q,
-			u"url"_q,
-			u"v1"_q,
-		},
-	});
-	builder.addButton({
-		.id = u"fork/summarization/api_key"_q,
-		.title = rpl::single(u"API key"_q),
-		.st = &st::settingsButton,
-		.icon = { &st::menuIconLock },
-		.label = summaryLabels->apiKey.value(),
-		.onClick = [=] {
-			controller->show(Box<TextValueBox>(
-				u"Summarization API key"_q,
-				u"Optional"_q,
-				[] { return Core::App().settings().fork().summaryApiKey(); },
-					[=](QString value) {
-						Core::App().settings().fork().setSummaryApiKey(
-							value.trimmed());
-						summaryLabels->apiKey = SummaryApiKeyLabel();
-						return true;
-					},
-				[](QString) { return false; },
-				true));
-		},
-		.keywords = {
-			u"summarization"_q,
-			u"summary"_q,
-			u"api"_q,
-			u"key"_q,
+			u"mcp"_q,
+			u"server"_q,
+			u"status"_q,
+			u"port"_q,
+			u"endpoint"_q,
+			u"authentication"_q,
 			u"token"_q,
+			u"tools"_q,
+			u"permissions"_q,
 		},
 	});
+
 	builder.addButton({
-		.id = u"fork/summarization/model"_q,
-		.title = rpl::single(u"Model"_q),
+		.id = u"fork/summarization"_q,
+		.title = rpl::single(u"Summarization"_q),
 		.st = &st::settingsButton,
 		.icon = { &st::menuIconSettings },
-		.label = summaryLabels->model.value(),
+		.label = summaryLabels->summarization.value(
+		) | rpl::map([](QString value) { return value + u"  ›"_q; }),
 		.onClick = [=] {
-			controller->show(Box<TextValueBox>(
-				u"Summarization model"_q,
-				u"Model name"_q,
-				[] { return Core::App().settings().fork().summaryModel(); },
-					[=](QString value) {
-						Core::App().settings().fork().setSummaryModel(
-							value.trimmed());
-						summaryLabels->model = SummaryModelLabel();
-						return true;
-					},
-				[](QString value) { return InvalidSummaryModel(value); }));
+			controller->show(Box<SummarizationSettingsBox>([=] {
+				summaryLabels->summarization = SummaryOverviewText();
+			}));
 		},
 		.keywords = {
 			u"summarization"_q,
@@ -1204,17 +1628,13 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 		},
 	});
 
-	builder.addSkip();
-	builder.addDivider();
-	builder.addSkip();
-
-	builder.addSubsectionTitle(rpl::single(u"Link rewrites"_q));
 	builder.addButton({
 		.id = u"fork/link_rewrites/manage"_q,
-		.title = rpl::single(u"Manage rewrite rules"_q),
+		.title = rpl::single(u"Link rewrites"_q),
 		.st = &st::settingsButton,
 		.icon = { &st::menuIconAddress },
-		.label = summaryLabels->linkRewrites.value(),
+		.label = summaryLabels->linkRewrites.value(
+		) | rpl::map([](QString value) { return value + u"  ›"_q; }),
 		.onClick = [=] {
 			controller->show(Box<LinkRewriteRulesBox>([=] {
 				summaryLabels->linkRewrites = LinkRewriteRulesLabel();
@@ -1226,6 +1646,9 @@ void BuildForkSectionContent(SectionBuilder &builder) {
 			u"rule"_q,
 			u"domain"_q,
 			u"host"_q,
+			u"path"_q,
+			u"prefix"_q,
+			u"www"_q,
 			u"fixupx"_q,
 			u"instagram"_q,
 			u"x.com"_q,

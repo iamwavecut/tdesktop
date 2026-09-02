@@ -3,6 +3,8 @@ Author: 23rd.
 */
 #pragma once
 
+#include "core/link_rewrite.h"
+
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
@@ -10,25 +12,12 @@ Author: 23rd.
 
 namespace Core {
 
-struct LinkRewriteRule {
-	QString sourceHost;
-	QString targetHost;
-
-	friend inline auto operator<=>(
-		const LinkRewriteRule &,
-		const LinkRewriteRule &) = default;
-	friend inline bool operator==(
-		const LinkRewriteRule &,
-		const LinkRewriteRule &) = default;
-};
-
 class ForkSettings final {
 public:
 	ForkSettings();
 
 	[[nodiscard]] static bool HideFromBlockedUsers();
 	[[nodiscard]] static bool PrimaryUnmutedMessages();
-	[[nodiscard]] static QString NormalizeLinkRewriteHost(QString value);
 	[[nodiscard]] static const std::vector<LinkRewriteRule> &DefaultLinkRewrites();
 
 	[[nodiscard]] QByteArray serialize() const;

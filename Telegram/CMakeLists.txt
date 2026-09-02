@@ -594,6 +594,8 @@ PRIVATE
     core/core_settings.h
     core/fork_settings.cpp
     core/fork_settings.h
+    core/link_rewrite.cpp
+    core/link_rewrite.h
     core/core_settings_proxy.cpp
     core/core_settings_proxy.h
     core/crash_report_window.cpp
@@ -615,6 +617,8 @@ PRIVATE
     core/deep_links/deep_links_types.h
     core/external_control.cpp
     core/external_control.h
+    core/mcp/mcp_access_policy.cpp
+    core/mcp/mcp_access_policy.h
     core/mcp/mcp_dispatcher.cpp
     core/mcp/mcp_dispatcher.h
     core/mcp/mcp_http_parser.cpp

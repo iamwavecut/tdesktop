@@ -5,8 +5,6 @@ Author: 23rd.
 
 #include "storage/serialize_common.h"
 
-#include <QtCore/QUrl>
-
 #include <algorithm>
 
 namespace Core {
@@ -20,9 +18,9 @@ bool StaticHideFromBlockedUsers = false;
 [[nodiscard]] std::vector<LinkRewriteRule> NormalizeLinkRewrites(
 		std::vector<LinkRewriteRule> rules) {
 	for (auto &rule : rules) {
-		rule.sourceHost = ForkSettings::NormalizeLinkRewriteHost(
+		rule.sourceHost = NormalizeLinkRewritePrefix(
 			std::move(rule.sourceHost));
-		rule.targetHost = ForkSettings::NormalizeLinkRewriteHost(
+		rule.targetHost = NormalizeLinkRewritePrefix(
 			std::move(rule.targetHost));
 	}
 	rules.erase(
@@ -43,29 +41,8 @@ bool ForkSettings::HideFromBlockedUsers() {
 	return StaticHideFromBlockedUsers;
 }
 
-QString ForkSettings::NormalizeLinkRewriteHost(QString value) {
-	value = value.trimmed().toLower();
-	if (value.isEmpty()
-		|| value.contains(u"://"_q)
-		|| value.contains(QChar(u'/'))
-		|| value.contains(QChar(u'?'))
-		|| value.contains(QChar(u'#'))
-		|| value.contains(QChar(u'@'))) {
-		return QString();
-	}
-	const auto parsed = QUrl(u"https://"_q + value + u"/"_q);
-	const auto host = parsed.host().toLower();
-	return (parsed.isValid() && !host.isEmpty() && host == value)
-		? host
-		: QString();
-}
-
 const std::vector<LinkRewriteRule> &ForkSettings::DefaultLinkRewrites() {
-	static const auto result = std::vector<LinkRewriteRule>{
-		{ u"x.com"_q, u"fixupx.com"_q },
-		{ u"instagram.com"_q, u"eeinstagram.com"_q },
-	};
-	return result;
+	return DefaultLinkRewriteRules();
 }
 
 QByteArray ForkSettings::serialize() const {
