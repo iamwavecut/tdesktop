@@ -63,13 +63,23 @@ jobs:
             exit 1
           fi
 
+          # Betas carry a plain tag too, the way upstream tags its own, so the
+          # tag cannot say which this is - the prerelease flag can.
+          BETA=0
+          if [ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" \
+                    --json isPrerelease -q .isPrerelease)" = "true" ]; then
+            BETA=1
+          fi
+          VERSION="${TAG#v}"
+
           mkdir -p deploy
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" \
             -p "$ASSET_NAME" -D deploy
           ls -l "deploy/$ASSET_NAME"
 
           echo "ASSET_PATH=deploy/$ASSET_NAME" >> "$GITHUB_ENV"
-          echo "ASSET_VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          echo "ASSET_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "ASSET_BETA=$BETA" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v6
         with:

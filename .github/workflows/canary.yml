@@ -532,8 +532,9 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-qtrel-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-qtrel-
+          # New prefix: the old -qtrel- caches hold the dropped Qt 5 build.
+          key: ${{ runner.OS }}-x64-qtrel-w7-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-qtrel-w7-
 
       - name: Libraries.
         run: |
@@ -557,7 +558,7 @@ jobs:
 
       - name: Free up some disk space.
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/qt6_windows7/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Save ThirdParty cache.
         if: steps.cache-third-party.outputs.cache-hit != 'true'
@@ -671,11 +672,12 @@ jobs:
         run: |
           cd $TBUILD/$REPO_NAME/out/Release
           BASE=${{ needs.version.outputs.base }}
-          # Unlike releases, canary does not bundle d3dcompiler_47.dll:
-          # the release copy is a pinned known-good build for Windows 7,
-          # while CI would grab whatever the runner's SDK ships. Canary
-          # machines use the system compiler dll.
-          ./Packer.exe -path Telegram.exe -path Updater.exe \
+          # ANGLE compiles its shaders through d3dcompiler_47.dll, which
+          # Windows 7 has no system copy of. The build copies the pinned
+          # one from cmake_helpers, so ship it like the releases do.
+          D3D=modules/x64/d3d/d3dcompiler_47.dll
+          [ -f "$D3D" ] || { echo "::error::missing $D3D for ANGLE"; exit 1; }
+          ./Packer.exe -path Telegram.exe -path Updater.exe -path $D3D \
             -target win64 \
             -version $BASE \
             -channel canary-${{ needs.version.outputs.channel }} \
@@ -709,6 +711,8 @@ jobs:
           mkdir -p portable/$CANARY_FOLDER/TelegramForcePortable
           touch portable/$CANARY_FOLDER/TelegramForcePortable/.keep
           cp Telegram.exe portable/$CANARY_FOLDER/
+          mkdir -p portable/$CANARY_FOLDER/modules/x64/d3d
+          cp $D3D portable/$CANARY_FOLDER/modules/x64/d3d/
           (cd portable && 7z a -mx9 ../$PORTABLE $CANARY_FOLDER/)
 
           mkdir -p artifact/update artifact/portable

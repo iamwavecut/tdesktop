@@ -12,10 +12,6 @@ on:
         description: 'Only prepare libraries and warm the cache.'
         type: boolean
         default: false
-      qt6:
-        description: 'Build against Qt 6. Required: lib_ui uses Qt 6 only accessibility API.'
-        type: boolean
-        default: true
       lto:
         description: 'Enable LTO (official builds use it, links much slower).'
         type: boolean
@@ -62,7 +58,7 @@ jobs:
       MSVC_ARCH: ${{ matrix.arch == 'x64' && 'x64' || 'x64_x86' }}
       LIBS_SUBDIR: ${{ matrix.arch == 'x64' && '\win64' || '' }}
       ISS_TARGET: ${{ matrix.arch == 'x64' && 'win64' || 'win32' }}
-      UPD_PREFIX: ${{ matrix.arch == 'x64' && 'tx64upd' || 'tupdate' }}
+      UPD_PREFIX: ${{ matrix.arch == 'x64' && 'td-update-win-x64-' || 'td-update-win-x86-' }}
       SETUP_PREFIX: ${{ matrix.arch == 'x64' && 'tsetup-x64' || 'tsetup' }}
       MODULES_ARCH: ${{ matrix.arch == 'x64' && 'x64' || 'x86' }}
       # Release asset names as the fork labels them (x86 = x32).
@@ -70,8 +66,6 @@ jobs:
       ASSET_PORTABLE: ${{ matrix.arch == 'x64' && 'Telegram.zip' || 'Telegram_x86.zip' }}
       ONLY_CACHE: ${{ (github.event_name == 'schedule' || inputs.only_cache) && 'true' || 'false' }}
       ENABLE_LTO: ${{ inputs.lto && 'true' || 'false' }}
-      # Qt 5 can't compile lib_ui's Qt 6 accessibility API, so qt6 stays on (tags included).
-      QT_OPTION: ${{ (github.event_name != 'workflow_dispatch' || inputs.qt6) && 'qt6' || '' }}
       PUBLISH_RELEASE: ${{ (inputs.publish_release || startsWith(github.ref, 'refs/tags/')) && 'true' || 'false' }}
 
     defaults:
@@ -172,6 +166,15 @@ jobs:
           else
             echo "AppVersionStrFull=${AppVersionStr}" >> $GITHUB_ENV
           fi
+
+          # Packer's channel and the file name suffix, both from BetaChannel.
+          if [ "$BetaChannel" != "0" ]; then
+            echo "UPD_CHANNEL=beta" >> $GITHUB_ENV
+            echo "UPD_SUFFIX=-beta" >> $GITHUB_ENV
+          else
+            echo "UPD_CHANNEL=stable" >> $GITHUB_ENV
+            echo "UPD_SUFFIX=" >> $GITHUB_ENV
+          fi
           echo "Building version $AppVersionStr ($AppVersion)."
 
           if [ "$ENABLE_LTO" == "true" ]; then
@@ -188,6 +191,7 @@ jobs:
           PACKER_KEY: ${{ secrets.PACKER_PRIVATE_KEY }}
           PACKER_BETA_KEY: ${{ secrets.PACKER_PRIVATE_BETA_KEY }}
           ALPHA_KEY: ${{ secrets.ALPHA_PRIVATE_KEY }}
+          UPDATE_LOCAL_KEY: ${{ secrets.UPDATE_LOCAL_KEY }}
         run: |
           set -e
           python3 - <<'PY'
@@ -217,6 +221,10 @@ jobs:
           # packer.cpp's only use of this is commented out, and -Werror rejects an unused static.
           (private / 'alpha_private.h').write_text(
               literal('AlphaPrivateKey', os.environ['ALPHA_KEY'], static=True))
+
+          # The v2 release key, passed to Packer as a file path, not compiled in.
+          (private / 'forkgram-release-2026a.pem').write_text(
+              os.environ['UPDATE_LOCAL_KEY'].strip() + '\n')
           PY
 
           # Presence of this file makes run_cmake.py build Packer (DESKTOP_APP_SPECIAL_TARGET).
@@ -322,31 +330,46 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-qt-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-qt-rel-
 
       # A restored cache that lost an artifact still reads as built; drop its key to refetch.
       - name: Heal stale cache keys.
         shell: bash
         run: |
           [ -d "$LibrariesPath" ] || exit 0
-          if [ ! -f "$LibrariesPath/yy_thunks/objs/$MODULES_ARCH/YY_Thunks_for_Win7.obj" ]; then
-            rm -f "$LibrariesPath"/cache_keys/yy_thunks*
-            echo "yy_thunks object missing, dropped its cache key"
+          drop() {
+            rm -f "$LibrariesPath"/cache_keys/$1
+            echo "$2, dropped the $1 cache key"
+          }
+          [ -f "$LibrariesPath/yy_thunks/objs/$MODULES_ARCH/YY_Thunks_for_Win7.lib" ] \
+            || drop yy_thunks "YY-Thunks library missing"
+          [ -f "$LibrariesPath/tg_angle/out/Release/tg_angle.lib" ] \
+            || drop tg_angle "ANGLE library missing"
+          # prepare.py rebuilds a stage whose folder the sweep emptied, but
+          # nv-codec-headers keeps its headers, so the folder survives without
+          # the makefile the ffmpeg build script installs from. The .pc files
+          # it reads live in the shared prefix, which has no stage of its own.
+          [ -f "$LibrariesPath/nv-codec-headers/Makefile" ] \
+            || drop nv-codec-headers "nv-codec-headers makefile missing"
+          if [ -z "$(ls -A "$LibrariesPath/local/lib/pkgconfig" 2>/dev/null)" ]; then
+            for lib in dav1d openh264 opus libvpx; do
+              drop $lib "pkg-config files missing"
+            done
           fi
 
       - name: Libraries.
         # No skip-release: a Release build needs Release libraries. Step timeout < job limit so cache saves still run.
         timeout-minutes: 285
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent %QT_OPTION% win7
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent
 
       - name: Free up some disk space.
         if: always()
         shell: bash
         run: |
           [ -d "$LibrariesPath" ] || { echo "nothing to clean up"; exit 0; }
-          find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/qt6windows7/*' -o -path '*/yy_thunks/*' ')' -type f ')' -o -empty ')' -delete || true
+          find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/qt6_windows7/*' -o -path '*/yy_thunks/*' -o -path '*/nv-codec-headers/*' -o -path '*/gas-preprocessor/*' ')' -type f ')' -o -empty ')' -delete || true
 
       - name: Save ThirdParty cache.
         if: always()
@@ -374,7 +397,7 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ env.QT_OPTION == 'qt6' && 'qt6' || 'qt5' }}-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
+          key: ${{ runner.OS }}-${{ matrix.arch }}-qt-rel-${{ env.CACHE_KEY }}-${{ github.run_id }}
 
       - name: Build tree cache.
         if: env.ONLY_CACHE == 'false'
@@ -395,8 +418,10 @@ jobs:
           rem Re-running cmake rewrites the .vcxproj files, and the fresh
           rem timestamps make MSBuild rebuild everything - which throws away the
           rem restored build tree. Reuse the tree when it was configured with the
-          rem same flags, and record them so a changed flag still reconfigures.
-          set "CFG_FLAGS=qt=%QT_OPTION% lto=%LTO_FLAG% target=%BUILD_TARGET% win7=on nodebug=1"
+          rem same flags and against the same libraries, and record both so that
+          rem a change in either still reconfigures - a tree carries absolute
+          rem paths and link lines resolved against the libraries of its own run.
+          set "CFG_FLAGS=lto=%LTO_FLAG% target=%BUILD_TARGET% qt6win7=on nodebug=1 libs=%CACHE_KEY%"
           set "CFG_MARKER=..\out\.ci_configure_flags"
           set "REUSE_TREE=0"
           if exist ..\out\CMakeCache.txt if exist "%CFG_MARKER%" (
@@ -411,11 +436,9 @@ jobs:
           echo Configuring the build tree.
 
           call configure.bat ^
-          %QT_OPTION% ^
           -D CMAKE_CONFIGURATION_TYPES=Release ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
-          -D DESKTOP_APP_WIN7_COMPAT=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           %LTO_FLAG% || exit /b 1
 
@@ -490,13 +513,18 @@ jobs:
           # Not $args: that is an automatic variable in PowerShell.
           $packerArgs = @('-version', $env:AppVersion, '-path', 'Telegram.exe', '-path', 'Updater.exe')
           $d3d = "modules\${env:MODULES_ARCH}\d3d\d3dcompiler_47.dll"
-          if (Test-Path $d3d) { $packerArgs += @('-path', $d3d) }
+          if (-not (Test-Path $d3d)) { Write-Error "missing $d3d for ANGLE"; exit 1 }
+          $packerArgs += @('-path', $d3d)
           $packerArgs += @('-target', $env:BUILD_TARGET)
+          $packerArgs += @('-channel', $env:UPD_CHANNEL)
+          $packerArgs += @('-keys-loc', "$env:TBUILD\$env:REPO_NAME\Telegram\Resources\update")
+          $packerArgs += @('-local-key', "$env:TBUILD\DesktopPrivate\forkgram-release-2026a.pem")
+          $packerArgs += @('-local-key-id', 'fg-2026a')
 
           & .\Packer.exe @packerArgs
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
-          $update = "${env:UPD_PREFIX}${env:AppVersion}"
+          $update = "${env:UPD_PREFIX}${env:AppVersion}${env:UPD_SUFFIX}"
           if (-not (Test-Path $update)) { Write-Error "$update was not produced"; exit 1 }
           echo "Produced $update ($((Get-Item $update).Length) bytes)"
 
@@ -540,11 +568,10 @@ jobs:
 
           Copy-Item (Join-Path $release 'Telegram.exe') $portableDir
           $d3d = Join-Path $release "modules\${env:MODULES_ARCH}\d3d\d3dcompiler_47.dll"
-          if (Test-Path $d3d) {
-            $modules = Join-Path $portableDir "modules\${env:MODULES_ARCH}\d3d"
-            New-Item -ItemType Directory -Path $modules -Force | Out-Null
-            Copy-Item $d3d $modules
-          }
+          if (-not (Test-Path $d3d)) { Write-Error "missing $d3d for ANGLE"; exit 1 }
+          $modules = Join-Path $portableDir "modules\${env:MODULES_ARCH}\d3d"
+          New-Item -ItemType Directory -Path $modules -Force | Out-Null
+          Copy-Item $d3d $modules
 
           Set-Location $deploy
           & 7z a -mx9 $env:ASSET_PORTABLE Telegram\
@@ -558,7 +585,7 @@ jobs:
           if (-not (Test-Path $installer)) { Write-Error "missing installer: $installer"; exit 1 }
           Copy-Item $installer (Join-Path $deploy $env:ASSET_INSTALLER)
 
-          $update = Join-Path $release "${env:UPD_PREFIX}${env:AppVersion}"
+          $update = Join-Path $release "${env:UPD_PREFIX}${env:AppVersion}${env:UPD_SUFFIX}"
           if (-not (Test-Path $update)) { Write-Error "missing update file: $update"; exit 1 }
           Copy-Item $update $deploy
 
@@ -585,13 +612,18 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             TARGET=()
           else
-            TAG="v$AppVersionStrFull"
+            TAG="v$AppVersionStr"
             TARGET=(--target dev)
           fi
 
           # Create only if missing, else just add assets, so the arch legs and the mac workflow share one release.
+          if [ "$BetaChannel" != "0" ]; then
+            PRERELEASE=(--prerelease)
+          else
+            PRERELEASE=()
+          fi
           if ! gh release view "$TAG" -R "$R" >/dev/null 2>&1; then
-            gh release create "$TAG" -R "$R" "${TARGET[@]}" \
+            gh release create "$TAG" -R "$R" "${TARGET[@]}" "${PRERELEASE[@]}" \
               --title "Forkgram $TAG" \
               --notes "Forkgram $TAG" >/dev/null 2>&1 \
               || gh release view "$TAG" -R "$R" >/dev/null

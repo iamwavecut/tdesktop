@@ -15,6 +15,7 @@ from telethon.tl.types import DocumentAttributeFilename
 CHANNEL = os.environ["TG_PUBLIC_CHANNEL"]
 ASSET_PATH = os.environ["ASSET_PATH"]
 VERSION = os.environ["ASSET_VERSION"]
+BETA = os.environ.get("ASSET_BETA", "0") == "1"
 DRY_RUN = os.environ.get("TG_DRY_RUN", "") == "1"
 SCHEDULE_DAYS = int(os.environ.get("TG_SCHEDULE_DAYS", "350") or "350")
 SEARCH_LIMIT = int(os.environ.get("TG_SEARCH_LIMIT", "200") or "200")
@@ -23,7 +24,7 @@ THUMB = os.environ.get("TG_THUMB") or os.path.join(
     "logo_256_square.png")
 
 CAPTION = ("— Updated version to "
-           "[{version}](https://github.com/telegramdesktop/tdesktop/releases/tag/v{version}).")
+           "[{label}](https://github.com/telegramdesktop/tdesktop/releases/tag/v{version}).")
 
 
 def document_name(message):
@@ -56,7 +57,9 @@ async def main():
         sys.exit(f"No thumbnail at {THUMB!r} (forgot to sparse-checkout it?).")
 
     asset_name = os.path.basename(ASSET_PATH)
-    caption = CAPTION.format(version=VERSION)
+    caption = CAPTION.format(
+        label=f"{VERSION} beta" if BETA else VERSION,
+        version=VERSION)
     size = os.path.getsize(ASSET_PATH) / 1048576
     print(f"File: {ASSET_PATH} ({size:.0f} MiB)")
     print(f"Caption: {caption}")

@@ -32,17 +32,18 @@ THUMB = os.environ.get("TG_THUMB") or os.path.join(
     "logo_256_square.png")
 
 # Update file name -> platform key the client matches against Platform::AutoUpdateKey().
+# The trailing -beta is the only thing that says which channel this is.
 NAME_TO_PLATFORM = [
-    (re.compile(r"^tx64upd(\d+)$"), "win64"),
-    (re.compile(r"^tarm64upd(\d+)$"), "winarm64"),
-    (re.compile(r"^tupdate(\d+)$"), "win"),
-    (re.compile(r"^tlinuxupd(\d+)$"), "linux"),
+    (re.compile(r"^td-update-win-x64-(\d+)(-beta)?$"), "win64"),
+    (re.compile(r"^td-update-win-arm-(\d+)(-beta)?$"), "winarm"),
+    (re.compile(r"^td-update-win-x86-(\d+)(-beta)?$"), "win"),
+    (re.compile(r"^td-update-linux-x64-(\d+)(-beta)?$"), "linux"),
 ]
 
 
 def find_update_files(root):
-    """Return {platform: (version:int, path)} for every update file under root."""
-    result = {}
+    """Return ({platform: (version:int, path)}, beta:bool) for the update files."""
+    result, betas = {}, set()
     for path in sorted(glob.glob(os.path.join(root, "**", "*"), recursive=True)):
         if not os.path.isfile(path):
             continue
@@ -55,8 +56,11 @@ def find_update_files(root):
                 sys.exit(f"Two update files map to {platform}: "
                          f"{result[platform][1]} and {path}")
             result[platform] = (int(m.group(1)), path)
+            betas.add(bool(m.group(2)))
             break
-    return result
+    if len(betas) > 1:
+        sys.exit(f"Mixed beta and stable update files in {root}: {sorted(result)}")
+    return result, bool(betas and betas.pop())
 
 
 def load_previous_feed(text):
@@ -87,7 +91,7 @@ def versions_in(feed):
 
 
 async def main():
-    updates = find_update_files(ARTIFACTS_DIR)
+    updates, beta = find_update_files(ARTIFACTS_DIR)
     if not updates:
         sys.exit(f"No update files found under {ARTIFACTS_DIR!r}.")
     if not os.path.isfile(THUMB):
@@ -118,15 +122,13 @@ async def main():
             print(f"Scheduling every message for {when:%Y-%m-%d} "
                   f"({SCHEDULE_DAYS} days out); nothing appears in the channels now.")
 
-        # The feed sets all four keys per platform (beta/stable x released/testing)
-        # to one message; a released build lands in all, a testing build only in
-        # the testing keys, leaving released users on the previous version.
-        if ENTRY_KEY == "testing":
-            targets = [("beta", "testing"), ("stable", "testing")]
-        else:
-            targets = [(chan, key)
-                       for chan in ("beta", "stable")
-                       for key in ("released", "testing")]
+        # A beta writes only its own channel, so opted-out clients stay on
+        # the last stable; a stable writes both, so beta users move on to it.
+        channels = ("beta",) if beta else ("beta", "stable")
+        keys = ("testing",) if ENTRY_KEY == "testing" else ("released", "testing")
+        targets = [(chan, key) for chan in channels for key in keys]
+        print(f"Publishing a {'beta' if beta else 'stable'} release into "
+              f"{'/'.join(channels)}.")
 
         for platform, (version, path) in sorted(updates.items()):
             if DRY_RUN:

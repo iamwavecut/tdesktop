@@ -1278,7 +1278,7 @@ void MtpChecker::start() {
 		startCanary();
 		return;
 	}
-	const auto updaterVersion = 2;//Platform::AutoUpdateVersion();
+	const auto updaterVersion = 1;//Platform::AutoUpdateVersion();
 	const auto feed = "frkgrmfeed"
 		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
 	MTP::ResolveChannel(&_mtp, feed, [=](

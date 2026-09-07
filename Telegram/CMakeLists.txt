@@ -510,6 +510,8 @@ PRIVATE
     calls/calls_panel.h
     calls/calls_panel_background.cpp
     calls/calls_panel_background.h
+    calls/calls_rate_call.cpp
+    calls/calls_rate_call.h
     calls/calls_signal_bars.cpp
     calls/calls_signal_bars.h
     calls/calls_top_bar.cpp
@@ -2008,6 +2010,8 @@ PRIVATE
     storage/storage_domain.h
     storage/storage_facade.cpp
     storage/storage_facade.h
+    storage/storage_folder_archive.cpp
+    storage/storage_folder_archive.h
     storage/storage_media_prepare.cpp
     storage/storage_media_prepare.h
     storage/storage_shared_media.cpp
@@ -2030,12 +2034,18 @@ PRIVATE
     support/support_templates.h
     tde2e/tde2e_integration.cpp
     tde2e/tde2e_integration.h
+    test/test_activation.cpp
+    test/test_activation.h
     test/test_agent.cpp
     test/test_agent.h
+    test/test_box_button.cpp
+    test/test_box_button.h
     test/test_capture.cpp
     test/test_capture.h
     test/test_custom_emoji.cpp
     test/test_custom_emoji.h
+    test/test_gated_stage.cpp
+    test/test_gated_stage.h
     test/test_history_fixtures.cpp
     test/test_history_fixtures.h
     test/test_hover.cpp
@@ -2048,6 +2058,8 @@ PRIVATE
     test/test_layer_root.h
     test/test_log.cpp
     test/test_log.h
+    test/test_log_lines.cpp
+    test/test_log_lines.h
     test/test_menu.cpp
     test/test_menu.h
     test/test_messages.cpp
@@ -2058,13 +2070,19 @@ PRIVATE
     test/test_panel.h
     test/test_probe.cpp
     test/test_probe.h
+    test/test_rpc_retry.cpp
+    test/test_rpc_retry.h
     test/test_runner.cpp
     test/test_runner.h
     test/test_scenario.cpp
     test/test_style.cpp
     test/test_style.h
+    test/test_text_reads.cpp
+    test/test_text_reads.h
     test/test_transfer.cpp
     test/test_transfer.h
+    test/test_via_window.cpp
+    test/test_via_window.h
     test/test_widgets.cpp
     test/test_widgets.h
     ui/boxes/edit_invite_link_session.cpp
@@ -2327,29 +2345,56 @@ if (WIN32)
     #     $<IF:${release},"Appending compatibility manifest.","Finalizing build.">
     # )
 
-    if (QT_VERSION LESS 6)
+    if (QT_VERSION LESS 6 OR DESKTOP_APP_WIN7_BASELINE)
         target_link_libraries(Telegram PRIVATE desktop-app::win_directx_helper)
+    endif()
+
+    if (DESKTOP_APP_WIN7_BASELINE)
+        # ANGLE loads d3dcompiler_47.dll from modules folder next to exe.
+        if (build_win64)
+            set(d3d_modules_subdir x64)
+        else()
+            set(d3d_modules_subdir x86)
+        endif()
+        set(d3d_modules_dir $<TARGET_FILE_DIR:Telegram>/modules/${d3d_modules_subdir}/d3d)
+        add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory ${d3d_modules_dir}
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different
+            ${cmake_helpers_loc}/win_directx_helper/modules/${d3d_modules_subdir}/d3d/d3dcompiler_47.dll
+            ${d3d_modules_dir}/d3dcompiler_47.dll
+        COMMENT
+            "Copying d3dcompiler_47.dll for ANGLE."
+        VERBATIM
+        )
     endif()
 
     target_link_options(Telegram PRIVATE /PDBPAGESIZE:8192)
 
-    option(DESKTOP_APP_WIN7_COMPAT "Enable Windows 7/8 compatibility by linking YY-Thunks objects." OFF)
-
-    set(yy_thunks_obj "")
-    if (DESKTOP_APP_WIN7_COMPAT AND NOT build_winarm AND NOT build_winstore)
+    set(yy_thunks_lib "")
+    if (DESKTOP_APP_WIN7_BASELINE)
         if (CMAKE_SIZEOF_VOID_P EQUAL 8)
-            set(_yy_thunks_arch x64)
+            set(yy_thunks_arch x64)
         else()
-            set(_yy_thunks_arch x86)
+            set(yy_thunks_arch x86)
         endif()
-        set(_yy_thunks_candidate "${libs_loc}/yy_thunks/objs/${_yy_thunks_arch}/YY_Thunks_for_Win7.obj")
-        if (EXISTS "${_yy_thunks_candidate}")
-            message(STATUS "YY-Thunks: enabling Windows 7/8 compatibility via ${_yy_thunks_candidate}")
-            set(yy_thunks_obj "${_yy_thunks_candidate}")
-            target_link_options(Telegram PRIVATE "${yy_thunks_obj}" /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:WINDOWS,6.01)
-        else()
-            message(FATAL_ERROR "DESKTOP_APP_WIN7_COMPAT=ON but YY-Thunks object not found at ${_yy_thunks_candidate}. Run Telegram/build/prepare/prepare.py with the 'win7' option to fetch it.")
+        set(yy_thunks_candidate "${libs_loc}/yy_thunks/objs/${yy_thunks_arch}/YY_Thunks_for_Win7.lib")
+        if (NOT EXISTS "${yy_thunks_candidate}")
+            message(FATAL_ERROR "YY-Thunks library not found at ${yy_thunks_candidate}. Run Telegram/build/prepare/prepare.py to build it.")
         endif()
+        message(STATUS "YY-Thunks: enabling Windows 7/8 compatibility via ${yy_thunks_candidate}")
+        set(yy_thunks_lib "${yy_thunks_candidate}")
+
+        # Three optional hooks are weak in a stock build, define defaults.
+        add_library(yy_thunks_defaults STATIC
+            ${src_loc}/_other/yy_thunks_defaults.cpp)
+        set_target_properties(yy_thunks_defaults PROPERTIES FOLDER "(external)")
+
+        # Whole archive: a plain link takes only already undefined symbols.
+        target_link_options(Telegram PRIVATE "/WHOLEARCHIVE:${yy_thunks_lib}" /SUBSYSTEM:WINDOWS,6.01)
+        target_link_libraries(Telegram PRIVATE yy_thunks_defaults)
+        target_compile_definitions(Telegram PRIVATE DESKTOP_APP_WIN7_BASELINE)
     endif()
 elseif (APPLE)
     if (NOT DESKTOP_APP_USE_PACKAGED)
@@ -2543,7 +2588,6 @@ if (MSVC)
         /DELAYLOAD:ws2_32.dll
         /DELAYLOAD:user32.dll
         /DELAYLOAD:gdi32.dll
-
         /DELAYLOAD:avrt.dll
         /DELAYLOAD:shell32.dll
         /DELAYLOAD:ole32.dll
@@ -2563,63 +2607,42 @@ if (MSVC)
         /DELAYLOAD:wtsapi32.dll
         /DELAYLOAD:propsys.dll
     )
-    if (QT_VERSION GREATER 6)
+    # YY-Thunks covers imports bound at link time, not delayed ones.
+    if (NOT DESKTOP_APP_WIN7_BASELINE)
+        target_link_options(Telegram PRIVATE /DELAYLOAD:advapi32.dll)
+    endif()
+    if (QT_VERSION GREATER 6 AND NOT DESKTOP_APP_WIN7_BASELINE)
         if (NOT build_winarm)
             target_link_options(Telegram PRIVATE
-#                 /DELAYLOAD:API-MS-Win-EventLog-Legacy-l1-1-0.dll
+                /DELAYLOAD:API-MS-Win-EventLog-Legacy-l1-1-0.dll
             )
         endif()
 
         target_link_options(Telegram
         PRIVATE
-#             /DELAYLOAD:API-MS-Win-Core-Console-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-1.dll
-#             /DELAYLOAD:API-MS-Win-Core-File-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Localization-l1-2-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-1.dll
-#             /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-0.dll # Synchronization.lib
-#             /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Console-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Fibers-l2-1-1.dll
+            /DELAYLOAD:API-MS-Win-Core-File-l1-1-0.dll
+            # Not delayed: WindowsApp.lib binds LoadLibraryExA here, and
+            # __delayLoadHelper2 calls it to resolve delayed imports -- self-recurses.
+            /DELAYLOAD:API-MS-Win-Core-Localization-l1-2-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Memory-l1-1-1.dll
+            /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-0.dll # Synchronization.lib
+            /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-1-0.dll
             # /DELAYLOAD:API-MS-Win-Core-Timezone-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Security-CryptoAPI-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-File-l2-1-2.dll
-#             /DELAYLOAD:API-MS-Win-Core-File-l2-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-File-l1-2-2.dll
-#             /DELAYLOAD:API-MS-Win-Core-Registry-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Registry-l2-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Console-l1-2-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Console-l2-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Heap-l2-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-String-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-String-Obsolete-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-MM-Time-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-ProcessThreads-l1-1-1.dll
-#             /DELAYLOAD:API-MS-Win-Core-PSApi-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-ProcessTopology-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-ProcessTopology-Obsolete-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-COM-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-NTUser-SysParams-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Shcore-Obsolete-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Kernel32-Legacy-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Kernel32-Legacy-l1-1-1.dll
-#             /DELAYLOAD:API-MS-Win-Core-Toolhelp-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-ThreadPool-l1-2-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-ThreadPool-Legacy-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-SystemTopology-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Timezone-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Localization-Obsolete-l1-2-0.dll
-#             /DELAYLOAD:API-MS-Win-Eventing-Provider-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-WoW64-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Fibers-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Fibers-l1-1-1.dll
-#             /DELAYLOAD:API-MS-Win-Core-Synch-l1-2-1.dll
-#             /DELAYLOAD:API-MS-Win-Core-Synch-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-Synch-Ansi-l1-1-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-SysInfo-l1-2-0.dll
-#             /DELAYLOAD:API-MS-Win-Core-ProcessEnvironment-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-WinRT-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-WinRT-Error-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Core-WinRT-String-l1-1-0.dll
+            /DELAYLOAD:API-MS-Win-Security-CryptoAPI-l1-1-0.dll
             # /DELAYLOAD:API-MS-Win-Shcore-Scaling-l1-1-1.dll # We shadowed GetDpiForMonitor
+        )
+    endif()
+    if (QT_VERSION GREATER 6)
+        target_link_options(Telegram
+        PRIVATE
             /DELAYLOAD:authz.dll # Authz.lib
             /DELAYLOAD:comdlg32.dll
             /DELAYLOAD:dwrite.dll # DWrite.lib
@@ -2669,16 +2692,19 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
             target_link_options(Updater
             PRIVATE
                 /DELAYLOAD:user32.dll
-
                 /DELAYLOAD:shell32.dll
                 /DELAYLOAD:ole32.dll
                 /DELAYLOAD:shlwapi.dll
             )
+            if (NOT DESKTOP_APP_WIN7_BASELINE)
+                target_link_options(Updater PRIVATE /DELAYLOAD:advapi32.dll)
+            endif()
         else()
             target_link_options(Updater PRIVATE -municode)
         endif()
-        if (yy_thunks_obj)
-            target_link_options(Updater PRIVATE "${yy_thunks_obj}" /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:WINDOWS,6.01)
+        if (yy_thunks_lib)
+            target_link_options(Updater PRIVATE "/WHOLEARCHIVE:${yy_thunks_lib}" /SUBSYSTEM:WINDOWS,6.01)
+            target_link_libraries(Updater PRIVATE yy_thunks_defaults)
         endif()
     elseif (APPLE)
         target_compile_definitions(Updater PRIVATE TDESKTOP_APP_BUNDLE_NAME="${output_name}.app")
@@ -2718,8 +2744,9 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
             target_compile_definitions(Packer PRIVATE PACKER_USE_PACKAGED)
         endif()
 
-        if (WIN32 AND yy_thunks_obj)
-            target_link_options(Packer PRIVATE "${yy_thunks_obj}" /FORCE:MULTIPLE /IGNORE:4006 /SUBSYSTEM:CONSOLE,6.01)
+        if (WIN32 AND yy_thunks_lib)
+            target_link_options(Packer PRIVATE "/WHOLEARCHIVE:${yy_thunks_lib}" /SUBSYSTEM:CONSOLE,6.01)
+            target_link_libraries(Packer PRIVATE yy_thunks_defaults)
         endif()
 
         set_target_properties(Packer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})

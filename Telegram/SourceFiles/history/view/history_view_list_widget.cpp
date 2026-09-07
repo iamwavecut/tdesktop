@@ -3259,15 +3259,14 @@ void ListWidget::paintUserpics(
 			const auto hasTranslation = context.gestureHorizontal.translation
 				&& (context.gestureHorizontal.msgBareId
 					== item->fullId().msg.bare);
+			const auto shift = context.gestureHorizontal.visualTranslation();
 			if (hasTranslation) {
-				p.translate(context.gestureHorizontal.translation, 0);
+				p.translate(shift, 0);
 				update(
 					QRect(
-						st::historyPhotoLeft
-							+ context.gestureHorizontal.translation,
+						st::historyPhotoLeft + std::min(shift, 0),
 						userpicTop,
-						st::msgPhotoSize
-							- context.gestureHorizontal.translation,
+						st::msgPhotoSize + std::abs(shift),
 						st::msgPhotoSize));
 			}
 			const auto userpicOpacity = p.opacity();
@@ -3313,7 +3312,7 @@ void ListWidget::paintUserpics(
 				p.setOpacity(userpicOpacity);
 			}
 			if (hasTranslation) {
-				p.translate(-context.gestureHorizontal.translation, 0);
+				p.translate(-shift, 0);
 			}
 		}
 		return true;

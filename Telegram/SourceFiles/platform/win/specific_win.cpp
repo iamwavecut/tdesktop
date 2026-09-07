@@ -930,7 +930,8 @@ void psSendToMenu(bool send, bool silent) {
 		"You can disable send to menu item in Telegram settings.");
 }
 
-// Stub while we still support Windows 7.
+// Stub while we still support Windows 7, YY-Thunks has it in Qt 6 builds.
+#ifndef DESKTOP_APP_WIN7_BASELINE
 extern "C" {
 
 STDAPI GetDpiForMonitor(
@@ -944,3 +945,4 @@ STDAPI GetDpiForMonitor(
 }
 
 } // extern "C"
+#endif // !DESKTOP_APP_WIN7_BASELINE

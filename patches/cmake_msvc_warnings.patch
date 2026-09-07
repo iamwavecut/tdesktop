@@ -1,0 +1,12 @@
+diff --git a/options_win.cmake b/options_win.cmake
+index 9ff67e8..2075869 100644
+--- a/options_win.cmake
++++ b/options_win.cmake
+@@ -53,6 +53,7 @@ if (MSVC)
+         /wd4702 # unreachable code
+         /wd4310 # cast truncates constant value
+         /wd4127 # conditional expression is constant
++        /wd4189 # local variable is initialized but not referenced (MSVC 14.50+)
+ 
+         # Taken from Qt 6.
+         # https://developercommunity.visualstudio.com/content/problem/139261/msvc-incorrectly-defines-cplusplus.html

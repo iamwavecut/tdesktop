@@ -41,7 +41,7 @@ jobs:
     env:
       IMAGE_TAG: tdesktop:centos_env
       BUILD_CONFIG: MinSizeRel
-      UPD_PREFIX: tlinuxupd
+      UPD_PREFIX: td-update-linux-x64-
       ASSET_PORTABLE: Forkgram.tar.xz
       ONLY_CACHE: ${{ (github.event_name == 'schedule' || inputs.only_cache) && 'true' || 'false' }}
       PUBLISH_RELEASE: ${{ (inputs.publish_release || startsWith(github.ref, 'refs/tags/')) && 'true' || 'false' }}
@@ -64,6 +64,15 @@ jobs:
           else
             echo "AppVersionStrFull=${AppVersionStr}" >> $GITHUB_ENV
           fi
+
+          # Packer's channel and the file name suffix, both from BetaChannel.
+          if [ "$BetaChannel" != "0" ]; then
+            echo "UPD_CHANNEL=beta" >> $GITHUB_ENV
+            echo "UPD_SUFFIX=-beta" >> $GITHUB_ENV
+          else
+            echo "UPD_CHANNEL=stable" >> $GITHUB_ENV
+            echo "UPD_SUFFIX=" >> $GITHUB_ENV
+          fi
           echo "Building version $AppVersionStr ($AppVersion)."
 
       - name: Set up DesktopPrivate.
@@ -74,6 +83,7 @@ jobs:
           PACKER_KEY: ${{ secrets.PACKER_PRIVATE_KEY }}
           PACKER_BETA_KEY: ${{ secrets.PACKER_PRIVATE_BETA_KEY }}
           ALPHA_KEY: ${{ secrets.ALPHA_PRIVATE_KEY }}
+          UPDATE_LOCAL_KEY: ${{ secrets.UPDATE_LOCAL_KEY }}
         run: |
           set -e
           python3 - <<'PY'
@@ -103,6 +113,10 @@ jobs:
           # packer.cpp's only use of this is commented out, and -Werror rejects an unused static.
           (private / 'alpha_private.h').write_text(
               literal('AlphaPrivateKey', os.environ['ALPHA_KEY'], static=True))
+
+          # The v2 release key, passed to Packer as a file path, not compiled in.
+          (private / 'forkgram-release-2026a.pem').write_text(
+              os.environ['UPDATE_LOCAL_KEY'].strip() + '\n')
           PY
 
           ls -l $GITHUB_WORKSPACE/../DesktopPrivate
@@ -211,9 +225,13 @@ jobs:
         run: |
           set -e
           cd out/$BUILD_CONFIG
-          ./Packer -path Forkgram -path Updater -version "$AppVersion"
+          ./Packer -path Forkgram -path Updater -version "$AppVersion" \
+            -channel "$UPD_CHANNEL" \
+            -keys-loc "$GITHUB_WORKSPACE/Telegram/Resources/update" \
+            -local-key "$GITHUB_WORKSPACE/../DesktopPrivate/forkgram-release-2026a.pem" \
+            -local-key-id fg-2026a
 
-          update="${UPD_PREFIX}${AppVersion}"
+          update="${UPD_PREFIX}${AppVersion}${UPD_SUFFIX}"
           if [ ! -f "$update" ]; then
             echo "Packed update file $update was not produced."
             exit 1
@@ -230,7 +248,7 @@ jobs:
           tar -cJf "deploy/$ASSET_PORTABLE" -C "$release" Forkgram Updater
 
           # The update file keeps its raw name: the Telegram job derives the platform from it.
-          cp "$release/${UPD_PREFIX}${AppVersion}" deploy/
+          cp "$release/${UPD_PREFIX}${AppVersion}${UPD_SUFFIX}" deploy/
 
           ls -l deploy
 
@@ -255,13 +273,18 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             TARGET=()
           else
-            TAG="v$AppVersionStrFull"
+            TAG="v$AppVersionStr"
             TARGET=(--target dev)
           fi
 
           # Create only if missing, else just add assets, so the Windows and macOS legs share one release.
+          if [ "$BetaChannel" != "0" ]; then
+            PRERELEASE=(--prerelease)
+          else
+            PRERELEASE=()
+          fi
           if ! gh release view "$TAG" -R "$R" >/dev/null 2>&1; then
-            gh release create "$TAG" -R "$R" "${TARGET[@]}" \
+            gh release create "$TAG" -R "$R" "${TARGET[@]}" "${PRERELEASE[@]}" \
               --title "Forkgram $TAG" \
               --notes "Forkgram $TAG" >/dev/null 2>&1 \
               || gh release view "$TAG" -R "$R" >/dev/null
