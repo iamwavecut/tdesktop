@@ -1,5 +1,5 @@
 diff --git a/external/CMakeLists.txt b/external/CMakeLists.txt
-index ba65d2b..7850149 100644
+index 27691c2..d6341d2 100644
 --- a/external/CMakeLists.txt
 +++ b/external/CMakeLists.txt
 @@ -48,6 +48,7 @@ if (DESKTOP_APP_USE_PANGO)
@@ -8,8 +8,8 @@ index ba65d2b..7850149 100644
  add_checked_subdirectory(qr_code_generator)
 +add_checked_subdirectory(zbar)
  add_checked_subdirectory(ranges)
- add_checked_subdirectory(rlottie)
  add_checked_subdirectory(rnnoise)
+ add_checked_subdirectory(tde2e)
 diff --git a/external/zbar/CMakeLists.txt b/external/zbar/CMakeLists.txt
 new file mode 100644
 index 0000000..2f3c55c

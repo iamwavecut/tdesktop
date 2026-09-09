@@ -18,12 +18,17 @@ foreach(_patch ${_submodule_patches})
     string(REPLACE "_" ";" _parts ${_patch_stem})
     list(LENGTH _parts _n)
     set(_applied FALSE)
-    while(_n GREATER 0 AND NOT _applied)
+    set(_already FALSE)
+    set(_matched "")
+    while(_n GREATER 0 AND NOT _applied AND NOT _already)
         list(SUBLIST _parts 0 ${_n} _head)
         string(REPLACE ";" "_" _candidate "${_head}")
         foreach(_root "Telegram/" "")
             set(_dir "${CMAKE_SOURCE_DIR}/${_root}${_candidate}")
             if (IS_DIRECTORY ${_dir} AND EXISTS ${_dir}/.git)
+                if (NOT _matched)
+                    set(_matched "${_root}${_candidate}")
+                endif()
                 execute_process(
                     COMMAND git apply --check ${_patch}
                     WORKING_DIRECTORY ${_dir}
@@ -40,12 +45,34 @@ foreach(_patch ${_submodule_patches})
                     set(_applied TRUE)
                     break()
                 endif()
+                # Forward apply failed. Only a patch that reverses cleanly is
+                # already applied; anything else has rotted against a moved
+                # submodule and would otherwise be dropped without a trace.
+                execute_process(
+                    COMMAND git apply --reverse --check ${_patch}
+                    WORKING_DIRECTORY ${_dir}
+                    RESULT_VARIABLE _reverse_result
+                    OUTPUT_VARIABLE _reverse_output
+                    ERROR_VARIABLE _reverse_output
+                )
+                if (_reverse_result EQUAL 0 AND NOT _reverse_output MATCHES "Skipped patch")
+                    message(STATUS "Skipped patch ${_patch_name} (already applied in ${_root}${_candidate})")
+                    set(_already TRUE)
+                    break()
+                endif()
             endif()
         endforeach()
         math(EXPR _n "${_n} - 1")
     endwhile()
-    if (NOT _applied)
-        message(STATUS "Skipped patch ${_patch_name} (no matching submodule or already applied)")
+    if (NOT _applied AND NOT _already)
+        if (_matched)
+            message(WARNING
+                "Patch ${_patch_name} no longer applies to ${_matched} and is not "
+                "already applied there. It is being ignored -- refresh it against "
+                "the current submodule or delete it.")
+        else()
+            message(STATUS "Skipped patch ${_patch_name} (no matching submodule)")
+        endif()
     endif()
 endforeach()
 
