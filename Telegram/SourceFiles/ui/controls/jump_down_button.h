@@ -13,9 +13,10 @@ namespace Ui {
 
 class InfiniteRadialAnimation;
 
-class JumpDownButton final : public RippleButton {
+class JumpDownButton : public RippleButton {
 public:
 	JumpDownButton(QWidget *parent, const style::TwoIconButton &st);
+	~JumpDownButton() override;
 
 	void setUnreadCount(int unreadCount);
 	void setLoadingIcons(

@@ -10,7 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_style.h"
 #include "ui/controls/jump_down_button.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/widgets/shadow.h"
+#include "base/event_filter.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -26,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "ui/toast/toast.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_widgets.h"
 
 namespace {
 
@@ -34,6 +38,149 @@ constexpr auto kUnreadSummaryButtonThreshold = 50;
 } // namespace
 
 namespace HistoryView {
+namespace {
+
+constexpr auto kStashDelay = crl::time(150);
+constexpr auto kStashArrowDuration = crl::time(106);
+constexpr auto kStashBounceDuration = crl::time(173);
+constexpr auto kStashDuration = kStashDelay
+	+ kStashArrowDuration
+	+ kStashBounceDuration;
+
+[[nodiscard]] float64 ArrowShift(float64 value) {
+	const auto from = kStashDelay / float64(kStashDuration);
+	const auto till = (kStashDelay + kStashArrowDuration)
+		/ float64(kStashDuration);
+	return (value <= from)
+		? -1.
+		: (value >= till)
+		? 0.
+		: ((value - till) / (till - from));
+}
+
+[[nodiscard]] float64 BubbleSwing(float64 value) {
+	const auto from = (kStashDelay + kStashArrowDuration)
+		/ float64(kStashDuration);
+	if (value <= from) {
+		return 0.;
+	}
+	const auto bounce = (value - from) / (1. - from);
+	return std::sin(2 * M_PI * bounce) * (1. - bounce);
+}
+
+} // namespace
+
+class StashButton final : public Ui::JumpDownButton {
+public:
+	StashButton(
+		QWidget *parent,
+		const style::TwoIconButton &st,
+		const style::icon &arrow,
+		const style::icon &arrowOver);
+
+	void setArrowShown(bool shown, float64 buttonVisible);
+	void finishAnimating();
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	const style::TwoIconButton &_st;
+	const style::icon &_arrow;
+	const style::icon &_arrowOver;
+	Ui::Animations::Simple _animation;
+	std::optional<float64> _frozen;
+	bool _arrowShown = false;
+
+};
+
+StashButton::StashButton(
+	QWidget *parent,
+	const style::TwoIconButton &st,
+	const style::icon &arrow,
+	const style::icon &arrowOver)
+: JumpDownButton(parent, st)
+, _st(st)
+, _arrow(arrow)
+, _arrowOver(arrowOver) {
+}
+
+void StashButton::setArrowShown(bool shown, float64 buttonVisible) {
+	if (_arrowShown == shown) {
+		return;
+	}
+	_arrowShown = shown;
+	if (!shown) {
+		_frozen = _animation.value(1.);
+		_animation.stop();
+		update();
+		return;
+	}
+	const auto from = (buttonVisible > 0.) ? _frozen.value_or(1.) : 0.;
+	_frozen = std::nullopt;
+	if (from < 1.) {
+		_animation.start(
+			[=] { update(); },
+			from,
+			1.,
+			kStashDuration * (1. - from));
+	}
+	update();
+}
+
+void StashButton::finishAnimating() {
+	_frozen = std::nullopt;
+	_animation.stop();
+	update();
+}
+
+void StashButton::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+
+	const auto active = isOver() || isDown();
+	(active ? _st.iconBelowOver : _st.iconBelow).paint(
+		p,
+		_st.iconPosition,
+		width());
+	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y());
+
+	const auto value = _frozen.value_or(_animation.value(1.));
+	const auto swing = BubbleSwing(value) * st::historyStashBubbleTravel;
+	const auto dip = QPoint(0, int(base::SafeRound(swing)));
+	(active ? _st.iconAboveOver : _st.iconAbove).paint(
+		p,
+		_st.iconPosition + dip,
+		width());
+
+	const auto shift = ArrowShift(value);
+	if (shift <= -1.) {
+		return;
+	}
+	p.setClipRect(QRect(
+		st::historyStashArrowClipPosition + dip,
+		st::historyStashArrowClipSize));
+	const auto skip
+		= int(base::SafeRound(shift * st::historyStashArrowTravel));
+	(active ? _arrowOver : _arrow).paint(
+		p,
+		_st.iconPosition + dip + QPoint(0, skip),
+		width());
+}
+
+namespace {
+
+[[nodiscard]] object_ptr<StashButton> MakeStashButton(
+		not_null<QWidget*> parent,
+		not_null<const Ui::ChatStyle*> st,
+		rpl::lifetime &lifetime) {
+	return object_ptr<StashButton>(
+		parent,
+		st->value(lifetime, st::historyStash),
+		st->value(lifetime, st::historyStashArrow),
+		st->value(lifetime, st::historyStashArrowOver));
+}
+
+} // namespace
 
 CornerButtons::CornerButtons(
 	not_null<Ui::ScrollArea*> parent,
@@ -69,18 +216,28 @@ CornerButtons::CornerButtons(
 , _down(
 	&_column,
 	st->value(_stLifetime, st::historyToDown))
-	, _summarizeDown(
-		parent,
-		st->value(_stLifetime, st::historySummarizeDown))
-	, _mentions(
-		parent,
-		st->value(_stLifetime, st::historyUnreadMentions))
-	, _reactions(
-		parent,
-		st->value(_stLifetime, st::historyUnreadReactions))
-	, _pollVotes(
-		parent,
-		st->value(_stLifetime, st::historyUnreadPollVotes)) {
+, _summarizeDown(
+	&_column,
+	st->value(_stLifetime, st::historySummarizeDown))
+, _mentions(
+	&_column,
+	st->value(_stLifetime, st::historyUnreadMentions))
+, _reactions(
+	&_column,
+	st->value(_stLifetime, st::historyUnreadReactions))
+, _pollVotes(
+	&_column,
+	st->value(_stLifetime, st::historyUnreadPollVotes))
+, _stash(MakeStashButton(&_column, st, _stLifetime))
+, _stashButton(static_cast<StashButton*>(_stash.widget.data())) {
+	_column.setAttribute(Qt::WA_TransparentForMouseEvents);
+	_column.show();
+	_column.setVisualTabOrder(true);
+	_column.setVisualTabOrderOverlay(true);
+	if (const auto scroll = qobject_cast<Ui::RpWidget*>(_parent.get())) {
+		scroll->setVisualTabOrder(true);
+	}
+
 	const auto &summarizeDownLoading = st->value(
 		_stLifetime,
 		st::historySummarizeDownLoadingAbove);
@@ -92,6 +249,15 @@ CornerButtons::CornerButtons(
 	_mentions.widget->addClickHandler([=] { mentionsClick(); });
 	_reactions.widget->addClickHandler([=] { reactionsClick(); });
 	_pollVotes.widget->addClickHandler([=] { pollVotesClick(); });
+	_stash.widget->addClickHandler([=] { _stashClicks.fire({}); });
+	const auto stash = _stash.widget.data();
+	base::install_event_filter(stash, [=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::ContextMenu) {
+			showStashMenu();
+			return base::EventFilterResult::Cancel;
+		}
+		return base::EventFilterResult::Continue;
+	});
 	_summarizeDown.widget->setLoadingIcons(
 		&summarizeDownLoading,
 		&summarizeDownLoadingOver);
@@ -101,6 +267,7 @@ CornerButtons::CornerButtons(
 	_reactions.widget->setAccessibleName(tr::lng_jump_to_reaction(tr::now));
 	_pollVotes.widget->setAccessibleName(
 		tr::lng_jump_to_poll_votes(tr::now));
+	_stash.widget->setAccessibleName(tr::lng_stash_restore(tr::now));
 
 	const auto filterScroll = [&](CornerButton &button) {
 		button.widget->installEventFilter(this);
@@ -110,6 +277,7 @@ CornerButtons::CornerButtons(
 	filterScroll(_mentions);
 	filterScroll(_reactions);
 	filterScroll(_pollVotes);
+	filterScroll(_stash);
 
 	SendMenu::SetupUnreadMentionsMenu(_mentions.widget.data(), [=] {
 		return _delegate->cornerButtonsThread();
@@ -136,7 +304,8 @@ bool CornerButtons::eventFilter(QObject *o, QEvent *e) {
 			|| o == _summarizeDown.widget
 			|| o == _mentions.widget
 			|| o == _reactions.widget
-			|| o == _pollVotes.widget)) {
+			|| o == _pollVotes.widget
+			|| o == _stash.widget)) {
 		return _scrollViewportEvent(e);
 	}
 	return QObject::eventFilter(o, e);
@@ -270,6 +439,7 @@ CornerButton &CornerButtons::buttonByType(Type type) {
 	case Type::Mentions: return _mentions;
 	case Type::Reactions: return _reactions;
 	case Type::PollVotes: return _pollVotes;
+	case Type::Stash: return _stash;
 	}
 	Unexpected("Type in CornerButtons::buttonByType.");
 }
@@ -287,6 +457,10 @@ void CornerButtons::showAt(MsgId id) {
 	}
 }
 
+bool CornerButtons::ignoresVisibility() const {
+	return _delegate->cornerButtonsIgnoreVisibility();
+}
+
 void CornerButtons::updateVisibility(Type type, bool shown) {
 	auto &button = buttonByType(type);
 	if (button.shown != shown) {
@@ -296,6 +470,11 @@ void CornerButtons::updateVisibility(Type type, bool shown) {
 			button.hidingTop = button.widget->y();
 		}
 		button.shown = shown;
+		if (type == Type::Stash) {
+			_stashButton->setArrowShown(
+				shown,
+				button.animation.value(shown ? 0. : 1.));
+		}
 		button.animation.start(
 			[=] { updatePositions(); },
 			shown ? 0. : 1.,
@@ -427,12 +606,14 @@ void CornerButtons::updatePositions() {
 	place(_mentions);
 	place(_reactions);
 	place(_pollVotes);
+	place(_stash);
 
 	checkVisibility(_down);
 	checkVisibility(_summarizeDown);
 	checkVisibility(_mentions);
 	checkVisibility(_reactions);
 	checkVisibility(_pollVotes);
+	checkVisibility(_stash);
 
 	// Leave only the buttons in the column's hit test, so a click on the rest
 	// of the strip goes to the list under it. The attribute alone would not
@@ -447,9 +628,11 @@ void CornerButtons::updatePositions() {
 		}
 	};
 	addToMask(_down);
+	addToMask(_summarizeDown);
 	addToMask(_mentions);
 	addToMask(_reactions);
 	addToMask(_pollVotes);
+	addToMask(_stash);
 	_column.setAttribute(Qt::WA_TransparentForMouseEvents, mask.isEmpty());
 	if (_columnMask != mask) {
 		_columnMask = mask;
@@ -463,7 +646,41 @@ void CornerButtons::finishAnimations() {
 	_mentions.animation.stop();
 	_reactions.animation.stop();
 	_pollVotes.animation.stop();
+	_stash.animation.stop();
+	_stashButton->finishAnimating();
 	updatePositions();
+}
+
+rpl::producer<> CornerButtons::stashClicks() const {
+	return _stashClicks.events();
+}
+
+void CornerButtons::setStashMenuFiller(
+		Fn<void(not_null<Ui::PopupMenu*>)> filler) {
+	_stashMenuFiller = std::move(filler);
+}
+
+void CornerButtons::showStashMenu() {
+	if (!_stashMenuFiller) {
+		return;
+	}
+	_stashMenu = base::make_unique_q<Ui::PopupMenu>(
+		_stash.widget.data(),
+		st::popupMenuWithIcons);
+	_stashMenuFiller(_stashMenu.get());
+	if (_stashMenu->empty()) {
+		_stashMenu = nullptr;
+		return;
+	}
+	const auto shadow = Ui::BoxShadow::ExtendFor(
+		st::popupMenuWithIcons.shadow);
+	_stashMenu->setForcedOrigin(Ui::PanelAnimation::Origin::BottomRight);
+	_stashMenu->popup(
+		_stash.widget->mapToGlobal(
+			st::historyStash.rippleAreaPosition
+				+ QPoint(
+					_stash.widget->width() - shadow.right(),
+					-shadow.bottom())));
 }
 
 Fn<void(bool found)> CornerButtons::doneJumpFrom(

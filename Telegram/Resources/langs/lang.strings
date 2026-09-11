@@ -847,6 +847,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_shortcuts_ai_compose_apply" = "Apply AI style to text";
 "lng_shortcuts_rich_editor" = "Open article editor";
 "lng_shortcuts_toggle_link_preview" = "Toggle link preview";
+"lng_shortcuts_stash_message" = "Stash or restore message";
 "lng_shortcuts_read_chat" = "Mark chat as read";
 "lng_shortcuts_archive_chat" = "Archive chat";
 "lng_shortcuts_media_fullscreen" = "Toggle video fullscreen";
@@ -1400,7 +1401,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_edit_share_list_button" = "Share Proxy List";
 "lng_proxy_edit_share_list_toast" = "Proxy List copied to clipboard.";
 "lng_proxy_address_label" = "Socket address";
-"lng_proxy_web_host_label" = "Web proxy hostname";
+"lng_proxy_web_server_label" = "Web proxy server";
 "lng_proxy_web_host_ph" = "proxy.example.com";
 "lng_proxy_credentials_optional" = "Credentials (optional)";
 "lng_proxy_credentials" = "Credentials";
@@ -1511,9 +1512,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fork_passkeys_choose_about" = "Several passkeys are stored on this Mac. Pick the one you want to log in with.";
 
 "lng_settings_quick_dialog_action_title" = "Chat list quick action";
-"lng_settings_quick_dialog_action_about" = "Choose the action you want to perform when you middle-click or swipe left in the chat list.";
-"lng_settings_quick_dialog_action_both" = "Swipe left and Middle-click";
-"lng_settings_quick_dialog_action_swipe" = "Swipe left";
+"lng_settings_quick_dialog_action_about" = "Choose the action you want to perform when you middle-click or swipe in the chat list.";
+"lng_settings_quick_dialog_action_both" = "Swipe and Middle-click";
+"lng_settings_quick_dialog_action_swipe" = "Swipe";
 "lng_settings_quick_dialog_action_mute" = "Mute";
 "lng_settings_quick_dialog_action_unmute" = "Unmute";
 "lng_settings_quick_dialog_action_pin" = "Pin";
@@ -5454,6 +5455,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_jump_to_mention" = "Jump to mention";
 "lng_jump_to_reaction" = "Jump to reaction";
 "lng_jump_to_poll_votes" = "Jump to poll votes";
+"lng_stash_restore" = "Restore stashed message";
+"lng_stash_files_limit" = "Too many or too large files to stash.";
 "lng_jump_unread_count#one" = "{count} unread";
 "lng_jump_unread_count#other" = "{count} unread";
 

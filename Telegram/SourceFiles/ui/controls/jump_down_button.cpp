@@ -26,6 +26,8 @@ JumpDownButton::JumpDownButton(
 	hide();
 }
 
+JumpDownButton::~JumpDownButton() = default;
+
 void JumpDownButton::loadingAnimationCallback() {
 	if (!anim::Disabled()) {
 		update();

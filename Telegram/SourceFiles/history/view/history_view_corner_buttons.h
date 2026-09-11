@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "ui/rp_widget.h"
 #include "base/object_ptr.h"
+#include "base/unique_qptr.h"
 
 #include <optional>
 
@@ -22,6 +23,7 @@ class ChatStyle;
 class ScrollArea;
 class ElasticScroll;
 class JumpDownButton;
+class PopupMenu;
 } // namespace Ui
 
 namespace Data {
@@ -30,6 +32,8 @@ class Thread;
 } // namespace Data
 
 namespace HistoryView {
+
+class StashButton;
 
 struct CornerButton {
 	template <typename ...Args>
@@ -48,6 +52,7 @@ enum class CornerButtonType {
 	Mentions,
 	Reactions,
 	PollVotes,
+	Stash,
 };
 
 class CornerButtonsDelegate {
@@ -92,10 +97,14 @@ public:
 	void skipReplyReturn(FullMsgId id);
 	void calculateNextReplyReturn();
 
+	[[nodiscard]] bool ignoresVisibility() const;
 	void updateVisibility(Type type, bool shown);
 	void updateUnreadThingsVisibility();
 	void updateJumpDownVisibility(std::optional<int> counter = {});
 	void updatePositions();
+
+	[[nodiscard]] rpl::producer<> stashClicks() const;
+	void setStashMenuFiller(Fn<void(not_null<Ui::PopupMenu*>)> filler);
 
 	void finishAnimations();
 
@@ -121,6 +130,7 @@ private:
 	[[nodiscard]] CornerButton &buttonByType(Type type);
 	[[nodiscard]] History *lookupHistory() const;
 	void showAt(MsgId id);
+	void showStashMenu();
 
 	// The unread counter is painted as a badge, so a screen reader should
 	// have it too - as the description, next to the unchanging name.
@@ -144,6 +154,11 @@ private:
 	CornerButton _mentions;
 	CornerButton _reactions;
 	CornerButton _pollVotes;
+	CornerButton _stash;
+	const not_null<StashButton*> _stashButton;
+	rpl::event_stream<> _stashClicks;
+	Fn<void(not_null<Ui::PopupMenu*>)> _stashMenuFiller;
+	base::unique_qptr<Ui::PopupMenu> _stashMenu;
 
 	HistoryItem *_replyReturn = nullptr;
 	QVector<FullMsgId> _replyReturns;

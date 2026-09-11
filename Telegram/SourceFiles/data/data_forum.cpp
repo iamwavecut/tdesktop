@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_histories.h"
 #include "data/data_changes.h"
+#include "data/data_compose_stash.h"
 #include "data/data_session.h"
 #include "data/data_forum_icons.h"
 #include "data/data_forum_topic.h"
@@ -91,6 +92,9 @@ Forum::~Forum() {
 			rootId,
 			PeerId()));
 		_history->setForwardDraft(rootId, PeerId(), {});
+		_history->setComposeStash(
+			Data::DraftKey::Local(rootId, PeerId()),
+			nullptr);
 
 		const auto raw = topic.get();
 		changes.topicRemoved(raw);
@@ -238,6 +242,9 @@ void Forum::applyTopicDeleted(MsgId rootId) {
 		rootId,
 		PeerId()));
 	_history->setForwardDraft(rootId, PeerId(), {});
+	_history->setComposeStash(
+		Data::DraftKey::Local(rootId, PeerId()),
+		nullptr);
 }
 
 void Forum::reorderLastTopics() {
