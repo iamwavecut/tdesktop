@@ -87,6 +87,7 @@ namespace {
 constexpr auto kNotificationTextLimit = 255;
 constexpr auto kPinnedMessageTextLimit = 16;
 constexpr auto kMinLoginCode = 5;
+constexpr auto kLoginCodeLength = 5;
 
 using ItemPreview = HistoryView::ItemPreview;
 
@@ -143,6 +144,26 @@ template <typename T>
 	}
 	text.entities.insert(i, { EntityType::Spoiler, codeStart, codeLength });
 	return text;
+}
+
+[[nodiscard]] QString ExtractLoginCode(const TextWithEntities &text) {
+	static const auto RegExp = QRegularExpression(
+		u"(?<![\\w\\-#])(\\d{"_q
+			+ QString::number(kLoginCodeLength)
+			+ u"})(?![\\w\\-])"_q);
+	const auto m = RegExp.match(text.text);
+	if (!m.hasMatch()) {
+		return QString();
+	}
+	const auto codeStart = int(m.capturedStart(1));
+	const auto codeEnd = codeStart + int(m.capturedLength(1));
+	for (const auto &entity : text.entities) {
+		if ((entity.offset() < codeEnd)
+			&& (entity.offset() + entity.length() > codeStart)) {
+			return QString(); // Entities should not intersect code.
+		}
+	}
+	return m.captured(1);
 }
 
 [[nodiscard]] bool HasNotEmojiAndSpaces(const QString &text) {
@@ -600,16 +621,9 @@ HistoryItem::HistoryItem(
 			|| history->peer->isVerifyCodes())
 		&& (base::unixtime::now() - date() < 60 * 1)
 		&& (Core::App().settings().fork().copyLoginCode())) {
-		const auto text = SpoilerLoginCode(_text);
-		for (const auto &entity : text.entities) {
-			if (entity.type() == EntityType::Spoiler) {
-				TextUtilities::SetClipboardText({
-					text.text.mid(
-						entity.offset(),
-						entity.length()),
-				});
-				break;
-			}
+		const auto code = ExtractLoginCode(_text);
+		if (!code.isEmpty()) {
+			TextUtilities::SetClipboardText({ code });
 		}
 	}
 }
