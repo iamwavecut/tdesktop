@@ -137,3 +137,19 @@ if (APPLE)
             "$<TARGET_FILE_DIR:test_text>/Contents/Resources/"
     )
 endif()
+
+add_executable(test_message_share)
+init_target(test_message_share "(tests)")
+target_include_directories(test_message_share PRIVATE ${src_loc})
+target_precompile_headers(test_message_share PRIVATE ${src_loc}/logs.h)
+nice_target_sources(test_message_share ${src_loc}
+PRIVATE
+    api/message_share_policy.h
+    tests/test_message_share.cpp
+    mtproto/details/mtproto_dump_to_text.cpp
+    api/message_share_preparation.cpp
+    api/message_share_preparation.h
+    api/message_share_send.cpp
+    api/message_share_send.h
+)
+target_link_libraries(test_message_share PRIVATE tdesktop::td_scheme desktop-app::external_zlib desktop-app::lib_ui desktop-app::lib_base desktop-app::external_qt)

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/media/info_media_list_widget.h"
 
+#include "boxes/share_box.h"
+
 #include "forkgram/uri_menu.h"
 
 #include "info/global_media/info_global_media_provider.h"
@@ -1729,6 +1731,22 @@ void ListWidget::showContextMenu(
 					&st::menuIconSelect);
 			}
 		}
+	}
+
+	if (!_controller->storiesPeer()) {
+		auto shareItems = HistoryItemsList();
+		if (overSelected == SelectionState::OverSelectedItems) {
+			for (const auto &selected : collectSelectedItems().list) {
+				if (const auto current = MessageByGlobalId(selected.globalId)) {
+					shareItems.push_back(current);
+				}
+			}
+		} else {
+			shareItems.push_back(item);
+		}
+		ranges::sort(shareItems, ranges::less(), &HistoryItem::position);
+		AddMessageShareAction(_contextMenu,
+			_controller->parentController()->uiShow(), std::move(shareItems));
 	}
 
 	if (_contextMenu->empty()) {

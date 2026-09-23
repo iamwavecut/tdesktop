@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/admin_log/history_admin_log_inner.h"
 
+#include "boxes/share_box.h"
+
 #include "history/view/history_view_context_menu_fork.h"
 #include "history/history.h"
 #include "history/view/media/history_view_media.h"
@@ -2320,6 +2322,10 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				},
 				&st::menuIconCopy);
 		}
+	}
+
+	if (view) {
+		AddMessageShareAction(_menu, _controller->uiShow(), { view->data() });
 	}
 
 	if (_menu->empty()) {

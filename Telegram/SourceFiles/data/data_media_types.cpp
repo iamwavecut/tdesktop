@@ -1613,14 +1613,15 @@ MediaContact::MediaContact(
 	const QString &firstName,
 	const QString &lastName,
 	const QString &phoneNumber,
-	const SharedContact::VcardItems &vcardItems)
+	const QString &vcard)
 : Media(parent)
 , _contact(SharedContact{
 	.userId = userId,
 	.firstName = firstName,
 	.lastName = lastName,
 	.phoneNumber = phoneNumber,
-	.vcardItems = vcardItems,
+	.vcard = vcard,
+	.vcardItems = SharedContact::ParseVcard(vcard),
 }) {
 	parent->history()->owner().registerContactItem(userId, parent);
 }
@@ -1638,7 +1639,7 @@ std::unique_ptr<Media> MediaContact::clone(not_null<HistoryItem*> parent) {
 		_contact.firstName,
 		_contact.lastName,
 		_contact.phoneNumber,
-		_contact.vcardItems);
+		_contact.vcard);
 }
 
 const SharedContact *MediaContact::sharedContact() const {
@@ -1785,6 +1786,23 @@ TextForMimeData MediaLocation::clipboardText() const {
 	}
 	result.append(LocationClickHandler(_point).url());
 	return result;
+}
+
+MTPInputMedia MediaLocation::copyInputMedia() const {
+	const auto point = MTP_inputGeoPoint(
+		MTP_flags(0),
+		MTP_double(_point.lat()),
+		MTP_double(_point.lon()),
+		MTP_int(0));
+	return _title.isEmpty()
+		? MTPInputMedia(MTP_inputMediaGeoPoint(point))
+		: MTPInputMedia(MTP_inputMediaVenue(
+			point,
+			MTP_string(_title),
+			MTP_string(_description),
+			MTP_string(QString()),
+			MTP_string(QString()),
+			MTP_string(QString())));
 }
 
 bool MediaLocation::updateInlineResultMedia(const MTPMessageMedia &media) {

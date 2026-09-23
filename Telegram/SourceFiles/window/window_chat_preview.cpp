@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/view/history_view_chat_preview.h"
 #include "mainwidget.h"
+#include "main/session/session_show.h"
 #include "ui/widgets/popup_menu.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
@@ -60,7 +61,7 @@ bool ChatPreviewManager::show(
 	const auto parent = parentOverride
 		? parentOverride
 		: _controller->content();
-	auto preview = HistoryView::MakeChatPreview(parent, row.key.entry());
+	auto preview = HistoryView::MakeChatPreview(parent, row.key.entry(), _controller->uiShow());
 	if (!preview.menu) {
 		return false;
 	}

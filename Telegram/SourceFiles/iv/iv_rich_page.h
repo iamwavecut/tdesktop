@@ -276,6 +276,19 @@ struct RichPageBlocksSlice {
 	}
 };
 
+struct RichPageSharePart {
+	TextWithEntities text;
+	PhotoData *photo = nullptr;
+	DocumentData *document = nullptr;
+	std::optional<std::pair<float64, float64>> location;
+	uint64 group = 0;
+	bool spoiler = false;
+	bool unavailable = false;
+};
+
+[[nodiscard]] std::vector<RichPageSharePart> PrepareRichPageShare(
+	const RichPage &page);
+
 struct RichMessageLimits {
 	int lengthLimit = 32768;
 	int maxBlocks = 500;

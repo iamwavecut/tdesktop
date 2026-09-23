@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <limits>
 
 #include <QtCore/QSize>
+#include <QtGui/QTextDocumentFragment>
 
 namespace Iv {
 namespace {
@@ -2634,6 +2635,194 @@ TextWithEntities FlattenRichPageToSimpleText(const RichPage &page) {
 	if (result.empty()) {
 		result = TextWithEntities::Simple(tr::lng_message_empty(tr::now));
 	}
+	return result;
+}
+
+std::vector<RichPageSharePart> PrepareRichPageShare(const RichPage &page) {
+	auto result = std::vector<RichPageSharePart>();
+	auto text = tr::marked();
+	auto nextGroup = uint64(0);
+	const auto append = [&](TextWithEntities line) {
+		Markdown::ExpandInlineTextObjects(&line, false);
+		RemovePremiumOnlyInlineEntities(&line);
+		AppendSimpleBlock(&text, std::move(line));
+	};
+	const auto flush = [&] {
+		if (!text.empty()) {
+			result.push_back({ .text = std::exchange(text, {}) });
+		}
+	};
+	const auto appendMedia = [&](RichPageSharePart part) {
+		flush();
+		Markdown::ExpandInlineTextObjects(&part.text, false);
+		RemovePremiumOnlyInlineEntities(&part.text);
+		part.unavailable = !part.photo && !part.document && !part.location;
+		result.push_back(std::move(part));
+	};
+	const auto visit = [&](const auto &visit, const Block &block) -> void {
+		switch (block.kind) {
+		case BlockKind::Unsupported:
+			append(block.text.text);
+			append(block.caption.text);
+			append(tr::marked(block.url));
+			if (block.text.text.empty() && block.caption.text.empty()
+				&& block.url.isEmpty()) {
+				flush();
+				result.push_back({ .unavailable = true });
+			}
+			return;
+		case BlockKind::Photo:
+		case BlockKind::Video:
+		case BlockKind::Audio:
+		case BlockKind::File:
+			appendMedia({
+				.text = block.caption.text,
+				.photo = block.photo,
+				.document = block.document,
+				.spoiler = block.spoiler,
+			});
+			return;
+		case BlockKind::Map:
+			appendMedia({
+				.text = block.caption.text,
+				.location = {{ block.latitude, block.longitude }},
+			});
+			return;
+		case BlockKind::GroupedMedia: {
+			const auto group = ++nextGroup;
+			for (const auto &media : block.mediaItems) {
+				appendMedia({
+					.text = (&media == &block.mediaItems.front())
+						? block.caption.text : TextWithEntities(),
+					.photo = media.photo,
+					.document = media.document,
+					.group = group,
+					.spoiler = media.spoiler,
+				});
+			}
+			if (block.mediaItems.empty()) {
+				appendMedia({ .text = block.caption.text });
+			}
+			return;
+		}
+		case BlockKind::ButtonRow:
+			for (const auto &button : block.buttons) {
+				auto line = button.text.text;
+				using Type = HistoryMessageMarkupButton::Type;
+				const auto type = button.button.type;
+				if (type == Type::Url || type == Type::Auth
+					|| type == Type::WebView || type == Type::SimpleWebView
+					|| type == Type::CopyText) {
+					line.append(u"\n"_q).append(QString::fromUtf8(button.button.data));
+				}
+				append(std::move(line));
+			}
+			return;
+		case BlockKind::Table:
+			append(block.text.text);
+			for (const auto &row : block.tableRows) {
+				auto line = tr::marked();
+				for (const auto &cell : row.cells) {
+					if (!line.empty()) {
+						line.append(u" | "_q);
+					}
+					line.append(cell.text.text);
+				}
+				append(std::move(line));
+			}
+			return;
+		case BlockKind::List: {
+			auto number = OrderedListSequenceStart(block);
+			for (const auto &item : block.listItems) {
+				const auto prefix = (item.taskState == RichPage::TaskState::Checked)
+					? u"[x] "_q
+					: (item.taskState == RichPage::TaskState::Unchecked)
+					? u"[ ] "_q
+					: (block.listKind == RichPage::ListKind::Ordered)
+					? OrderedMarkerText(block.orderedList, item.number, number) + u" "_q
+					: u"- "_q;
+				append(tr::marked(prefix).append(item.text.text));
+				for (const auto &child : item.blocks) {
+					visit(visit, child);
+				}
+				number = item.number.value.value_or(number)
+					+ (block.orderedList.reversed ? -1 : 1);
+			}
+			return;
+		}
+		case BlockKind::Quote: {
+			flush();
+			const auto first = result.size();
+			append(block.text.text);
+			for (const auto &child : block.blocks) {
+				visit(visit, child);
+			}
+			append(block.caption.text);
+			flush();
+			for (auto i = first; i != result.size(); ++i) {
+				auto &part = result[i];
+				if (!part.photo && !part.document && !part.location
+					&& !part.text.empty()) {
+					part.text.entities.push_back({
+						EntityType::Blockquote, 0, int(part.text.text.size()) });
+				}
+			}
+			append(tr::marked(block.author));
+			return;
+		}
+		case BlockKind::Details:
+		case BlockKind::EmbedPost:
+			append(block.text.text);
+			for (const auto &child : block.blocks) {
+				visit(visit, child);
+			}
+			append(block.caption.text);
+			append(tr::marked(block.author));
+			if (block.date) {
+				append(tr::marked(DateText(block.date)));
+			}
+			append(tr::marked(block.url));
+			return;
+		case BlockKind::RelatedArticles:
+			append(block.text.text);
+			for (const auto &article : block.relatedArticles) {
+				append(tr::marked(article.title));
+				append(tr::marked(article.description));
+				append(tr::marked(FooterText(article)));
+				append(tr::marked(article.url));
+			}
+			return;
+		case BlockKind::Embed: {
+			const auto body = QTextDocumentFragment::fromHtml(
+				QString::fromUtf8(block.html)).toPlainText();
+			append(tr::marked(body));
+			append(block.caption.text);
+			append(tr::marked(block.url));
+			if (body.isEmpty() && block.caption.text.empty() && block.url.isEmpty()) {
+				flush();
+				result.push_back({ .unavailable = true });
+			}
+			return;
+		}
+		case BlockKind::Code: {
+			auto code = block.text.text;
+			code.entities.push_back({
+				EntityType::Pre, 0, int(code.text.size()), block.language });
+			append(std::move(code));
+			return;
+		}
+		default: {
+			auto line = tr::marked();
+			AppendSummaryBlock(&line, block, false);
+			append(std::move(line));
+			return;
+		}
+		}
+	};
+	for (const auto &block : page.blocks) {
+		visit(visit, block);
+	}
+	flush();
 	return result;
 }
 

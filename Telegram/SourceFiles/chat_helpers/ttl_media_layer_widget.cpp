@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/ttl_media_layer_widget.h"
 
 #include "base/event_filter.h"
+#include "boxes/share_box.h"
 #include "core/application.h"
 #include "core/core_screenshot_protection.h"
 #include "data/data_document.h"
@@ -30,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/ui_utility.h"
 #include "window/section_widget.h" // Window::ChatThemeValueFromPeer.
@@ -39,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_menu_icons.h"
 
 namespace ChatHelpers {
 namespace {
@@ -372,6 +375,18 @@ void ShowTTLMediaLayerWidget(
 		Window::ChatThemeValueFromPeer(
 			controller,
 			item->history()->peer));
+	const auto share = PrepareMessageShare(show, { item });
+	const auto previewWidget = preview.get();
+	base::install_event_filter(previewWidget, [=](not_null<QEvent*> event) {
+		if (event->type() != QEvent::ContextMenu || !share) {
+			return base::EventFilterResult::Continue;
+		}
+		const auto menu = new Ui::PopupMenu(previewWidget, st::popupMenuWithIcons);
+		menu->setAttribute(Qt::WA_DeleteOnClose);
+		menu->addAction(tr::lng_background_share(tr::now), share, &st::menuIconShare);
+		menu->popup(static_cast<QContextMenuEvent*>(event.get())->globalPos());
+		return base::EventFilterResult::Cancel;
+	});
 	preview->closeRequests(
 	) | rpl::on_next([=] {
 		show->hideLayer();

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_overlay_widget.h"
 
+#include "boxes/share_box.h"
+
 #include "apiwrap.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_peer_photo.h"
@@ -2281,6 +2283,19 @@ void OverlayWidget::refreshPollVotersWidgetGeometry() {
 
 void OverlayWidget::fillContextMenuActions(
 		const Ui::Menu::MenuCallback &addAction) {
+	if (CanShareMessage(_message)) {
+		if (const auto window = findWindow()) {
+			auto share = PrepareMessageShare(window->uiShow(), { not_null{ _message } }, DarkShareBoxStyle());
+			addAction(tr::lng_background_share(tr::now), crl::guard(_widget, [=] {
+				const auto onstack = share;
+				if (!_windowed) {
+					close();
+				}
+				onstack();
+			}), &st::mediaMenuIconShare);
+		}
+	}
+
 	if (_message && _message->isSponsored()) {
 		if (const auto window = findWindow()) {
 			const auto show = window->uiShow();

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_context_menu.h"
 
+#include "boxes/share_box.h"
+
 #include "forkgram/uri_menu.h"
 #include "history/view/history_view_context_menu_fork.h"
 
@@ -1518,6 +1520,17 @@ void AddMessageActions(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
 		not_null<ListWidget*> list) {
+	auto shareItems = HistoryItemsList();
+	const auto &owner = list->controller()->session().data();
+	if (request.overSelection && !request.selectedItems.empty()) {
+		shareItems = owner.idsToItems(ExtractIdsList(request.selectedItems));
+		ranges::sort(shareItems, ranges::less(), &HistoryItem::position);
+	} else if (request.item) {
+		shareItems = (request.pointState == PointState::GroupPart)
+			? HistoryItemsList{ not_null{ request.item } }
+			: owner.idsToItems(owner.itemOrItsGroup(request.item));
+	}
+	AddMessageShareAction(menu, list->controller()->uiShow(), std::move(shareItems));
 	AddPostLinkAction(menu, request);
 	AddForwardAction(menu, request, list);
 	AddOfferAction(menu, request, list);
@@ -3084,7 +3097,8 @@ void AddSelectRestrictionAction(
 		not_null<HistoryItem*> item,
 		bool addIcon) {
 	const auto peer = item->history()->peer;
-	if ((peer->allowsForwarding() && !item->forbidsForward())
+	if (CanShareMessage(item)
+		|| (peer->allowsForwarding() && !item->forbidsForward())
 		|| item->isSponsored()) {
 		return;
 	}

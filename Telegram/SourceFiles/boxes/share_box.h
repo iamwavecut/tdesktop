@@ -71,6 +71,24 @@ struct ShareBoxStyleOverrides {
 };
 [[nodiscard]] ShareBoxStyleOverrides DarkShareBoxStyle();
 
+[[nodiscard]] bool CanShareMessage(HistoryItem *item);
+[[nodiscard]] Fn<void(std::shared_ptr<Ui::Show>)> PrepareMessageShare(
+	HistoryItemsList items,
+	uint64 fallbackSessionId,
+	ShareBoxStyleOverrides st = {});
+[[nodiscard]] Fn<void()> PrepareMessageShare(
+	std::shared_ptr<Main::SessionShow> show,
+	HistoryItemsList items,
+	ShareBoxStyleOverrides st = {});
+void AddMessageShareAction(
+	not_null<Ui::PopupMenu*> menu,
+	std::shared_ptr<Main::SessionShow> show,
+	HistoryItemsList items);
+void ShareMessages(
+	std::shared_ptr<Main::SessionShow> show,
+	HistoryItemsList items,
+	ShareBoxStyleOverrides st = {});
+
 void FastShareMessageToSelf(
 	std::shared_ptr<Main::SessionShow> show,
 	not_null<HistoryItem*> item);
@@ -106,10 +124,11 @@ public:
 		Api::SendOptions,
 		Data::ForwardOptions)>;
 	using AsCopyCallback = Fn<void(
-		std::vector<not_null<PeerData*>>&&,
+		std::vector<not_null<Data::Thread*>>&&,
+		Fn<bool()> checkPaid,
 		TextWithTags&&,
-		bool emptyText,
-		TimeId scheduled)>;
+		Api::SendOptions,
+		bool emptyText)>;
 	using FilterCallback = Fn<bool(not_null<Data::Thread*>)>;
 
 	[[nodiscard]] static auto DefaultForwardCountMessages(
@@ -128,6 +147,9 @@ public:
 		SubmitCallback submitCallback;
 		FilterCallback filterCallback;
 		AsCopyCallback asCopyCallback;
+		Fn<int(const TextWithTags&, bool)> copyCountMessagesCallback;
+		Fn<int(not_null<Data::Thread*>, const TextWithTags&, bool, bool, bool)>
+			preparedCountMessagesCallback;
 		object_ptr<Ui::RpWidget> bottomWidget = { nullptr };
 		rpl::producer<QString> copyLinkText;
 		rpl::producer<QString> titleOverride;
@@ -156,7 +178,10 @@ private:
 	void prepareCommentField();
 	void scrollAnimationCallback();
 
-	void submit(Api::SendOptions options);
+	void submit(
+		Api::SendOptions options,
+		bool asCopy = false,
+		bool emptyText = false);
 	void copyLink() const;
 	bool searchByUsername(bool useCache = false);
 
@@ -181,7 +206,10 @@ private:
 		mtpRequestId requestId);
 	void peopleFail(const MTP::Error &error, mtpRequestId requestId);
 
-	void showMenu(not_null<Ui::RpWidget*> parent);
+	void showMenu(
+		not_null<Ui::RpWidget*> parent,
+		bool asCopy = false,
+		bool emptyText = false);
 
 	Descriptor _descriptor;
 	MTP::Sender _api;

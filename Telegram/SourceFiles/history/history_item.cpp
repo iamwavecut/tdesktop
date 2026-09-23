@@ -743,7 +743,7 @@ std::unique_ptr<Data::Media> HistoryItem::CreateMedia(
 			qs(media.vfirst_name()),
 			qs(media.vlast_name()),
 			qs(media.vphone_number()),
-			Data::SharedContact::ParseVcard(qs(media.vvcard())));
+			qs(media.vvcard()));
 	}, [&](const MTPDmessageMediaGeo &media) -> Result {
 		return media.vgeo().match([&](const MTPDgeoPoint &point) -> Result {
 			return std::make_unique<Data::MediaLocation>(

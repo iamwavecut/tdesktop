@@ -8923,3 +8923,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_folder_archive_status" = "ZIP archive";
 
 // Keys finished
+
+"lng_share_text_fallback" = "Messages that cannot be copied in their original format will be shared as text.";
+"lng_share_source_unavailable" = "This message is no longer available to share.";
+"lng_share_recipient_unavailable" = "You cannot send this content to the selected chat.";
+"lng_share_failed" = "Sharing stopped. Messages already sent will not be sent again. Retry to send the remaining messages.";
+"lng_share_uncertain" = "Delivery could not be confirmed. Check the destination before sharing again.";
+"lng_share_retry_unchanged" = "To retry this delivery, keep the same recipients, text and send options. Close this window to start a new share.";
+"lng_share_sending" = "Sending…";
+"lng_share_progress" = "Messages sent: {amount}";

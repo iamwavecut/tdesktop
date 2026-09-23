@@ -63,7 +63,7 @@ class Item final
 	, private ListDelegate
 	, private CornerButtonsDelegate {
 public:
-	Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread);
+	Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread, std::shared_ptr<Ui::Show> show);
 
 	[[nodiscard]] not_null<QAction*> action() const override;
 	[[nodiscard]] bool isEnabled() const override;
@@ -194,6 +194,7 @@ private:
 	bool cornerButtonsSummarizeDownActive() override;
 	bool cornerButtonsSummarizeDownLoading() override;
 
+	const std::shared_ptr<Ui::Show> _show;
 	const not_null<QAction*> _dummyAction;
 	const not_null<Main::Session*> _session;
 	const not_null<Data::Thread*> _thread;
@@ -286,8 +287,9 @@ struct StatusFields {
 	});
 }
 
-Item::Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread)
+Item::Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread, std::shared_ptr<Ui::Show> show)
 : Ui::Menu::ItemBase(parent, st::previewMenu.menu)
+, _show(std::move(show))
 , _dummyAction(new QAction(parent))
 , _session(&thread->session())
 , _thread(thread)
@@ -889,7 +891,7 @@ void Item::listVisibleAreaUpdated() {
 }
 
 std::shared_ptr<Ui::Show> Item::listUiShow() {
-	Unexpected("Item::listUiShow.");
+	return _show;
 }
 
 void Item::listShowPollResults(
@@ -1021,7 +1023,8 @@ bool Item::cornerButtonsSummarizeDownLoading() {
 
 ChatPreview MakeChatPreview(
 		QWidget *parent,
-		not_null<Dialogs::Entry*> entry) {
+		not_null<Dialogs::Entry*> entry,
+		std::shared_ptr<Ui::Show> show) {
 	const auto thread = entry->asThread();
 	if (!thread) {
 		return {};
@@ -1034,7 +1037,7 @@ ChatPreview MakeChatPreview(
 	};
 	const auto menu = result.menu.get();
 
-	auto action = base::make_unique_q<Item>(menu->menu(), thread);
+	auto action = base::make_unique_q<Item>(menu->menu(), thread, std::move(show));
 	result.actions = action->actions();
 	menu->addAction(std::move(action));
 	if (const auto topic = thread->asTopic()) {

@@ -15,6 +15,7 @@ class Entry;
 
 namespace Ui {
 class PopupMenu;
+class Show;
 } // namespace Ui
 
 namespace HistoryView {
@@ -34,6 +35,7 @@ struct ChatPreview {
 
 [[nodiscard]] ChatPreview MakeChatPreview(
 	QWidget *parent,
-	not_null<Dialogs::Entry*> entry);
+	not_null<Dialogs::Entry*> entry,
+	std::shared_ptr<Ui::Show> show);
 
 } // namespace HistoryView

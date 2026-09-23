@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
+#include "boxes/share_box.h"
+
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
 #include "dialogs/ui/chat_search_in.h"
@@ -3959,8 +3961,12 @@ void InnerWidget::contextMenuEvent(QContextMenuEvent *e) {
 
 	_menu = base::make_unique_q<Ui::PopupMenu>(
 		this,
-		row.fullId ? st::defaultPopupMenu : st::popupMenuExpandedSeparator);
+		row.fullId ? st::popupMenuWithIcons : st::popupMenuExpandedSeparator);
 	if (row.fullId) {
+		if (const auto item = session().data().message(row.fullId)) {
+			AddMessageShareAction(_menu, _controller->uiShow(), { item });
+		}
+
 		if (session().supportMode()) {
 			fillSupportSearchMenu(_menu.get());
 		}

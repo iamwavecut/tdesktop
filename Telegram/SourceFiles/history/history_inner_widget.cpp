@@ -822,18 +822,7 @@ void HistoryInner::setupSwipeReplyAndBack() {
 }
 
 bool HistoryInner::hasSelectRestriction() const {
-	if (_chooseForReportReason.has_value()) {
-		return false;
-	} else if (session().frozen()) {
-		return true;
-	} else if (!_sharingDisallowed.current()) {
-		return false;
-	} else if (const auto chat = _peer->asChat()) {
-		return !chat->canDeleteMessages();
-	} else if (const auto channel = _peer->asChannel()) {
-		return !channel->canDeleteMessages();
-	}
-	return true;
+	return !_chooseForReportReason.has_value() && session().frozen();
 }
 
 void HistoryInner::messagesReceived(
@@ -3081,9 +3070,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				&st::menuIconStats);
 		}
 
-		_menu->addAction(tr::lng_background_share(tr::now), [=] {
-			FastShareMessage(controller, item);
-		}, &st::menuIconShare);
 		Fork::AddReplaceMedia(_menu, item, controller);
 	};
 
@@ -4015,6 +4001,17 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					});
 				});
 		});
+	}
+
+	if (isUponSelected == 2) {
+		auto items = HistoryItemsList(_selected.begin(), _selected.end());
+		ranges::sort(items, ranges::less(), &HistoryItem::position);
+		AddMessageShareAction(_menu, controller->uiShow(), std::move(items));
+	} else if (_dragStateItem) {
+		const auto items = asGroup
+			? session->data().idsToItems(session->data().itemOrItsGroup(_dragStateItem))
+			: HistoryItemsList{ not_null{ _dragStateItem } };
+		AddMessageShareAction(_menu, controller->uiShow(), items);
 	}
 
 	if (leaderOrSelf && !_menu->empty()) {

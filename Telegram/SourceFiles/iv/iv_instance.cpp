@@ -154,8 +154,7 @@ struct LocalMarkdownTarget {
 }
 
 [[nodiscard]] bool CanShareMarkdownItem(not_null<HistoryItem*> item) {
-	const auto peer = item->history()->peer;
-	return peer->allowsForwarding() && !item->forbidsForward();
+	return CanShareMessage(item);
 }
 
 [[nodiscard]] QString RichMessageKey(FullMsgId itemId) {
@@ -291,20 +290,8 @@ void JoinRichMessageChannel(
 		? ResolveMarkdownItem(*messageContext)
 		: nullptr;
 	if (item && CanShareMarkdownItem(not_null{ item })) {
-		options.share = [context = *messageContext](
-				std::shared_ptr<Ui::Show> show) {
-			const auto session = ResolveMarkdownSession(context);
-			const auto itemId = context.clickHandlerContext.itemId;
-			const auto current = (session && itemId)
-				? session->data().message(itemId)
-				: nullptr;
-			if (!show || !current || !CanShareMarkdownItem(not_null{ current })) {
-				return;
-			}
-			FastShareMessage(
-				Main::MakeSessionShow(show, not_null{ session }),
-				not_null{ current });
-		};
+		options.share = PrepareMessageShare(
+			{ not_null{ item } }, item->history()->session().uniqueId());
 	}
 	return options;
 }
@@ -1471,15 +1458,7 @@ void Instance::showRichMessage(
 	};
 	options.initialFragment = std::move(initialFragment);
 	if (CanShareMarkdownItem(item)) {
-		options.share = [=](std::shared_ptr<Ui::Show> show) {
-			const auto current = session->data().message(itemId);
-			if (!show || !current || !CanShareMarkdownItem(not_null{ current })) {
-				return;
-			}
-			FastShareMessage(
-				Main::MakeSessionShow(show, not_null{ session }),
-				not_null{ current });
-		};
+		options.share = PrepareMessageShare({ item }, session->uniqueId());
 	}
 
 	auto i = _markdowns.find(key);

@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
 
+#include "boxes/share_box.h"
+#include "main/session/session_show.h"
+
 #include "history/view/history_view_about_view.h"
 #include "base/unixtime.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -2234,9 +2237,7 @@ bool ListWidget::showCopyRestrictionForSelected() {
 }
 
 bool ListWidget::hasSelectRestriction() const {
-	return session().frozen()
-		|| (_delegate->listSelectRestrictionType()
-			!= CopyRestrictionType::None);
+	return bool(session().frozen());
 }
 
 Element *ListWidget::lookupItemByY(int y) const {
@@ -4048,10 +4049,6 @@ void ListWidget::contextMenuEvent(QContextMenuEvent *e) {
 }
 
 void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
-	if (!controllerOrNull()) {
-		// Every entry of this menu needs a window, like in the chat preview.
-		return;
-	}
 	if (e->reason() == QContextMenuEvent::Mouse) {
 		mouseActionUpdate(e->globalPos());
 	} else if (e->reason() == QContextMenuEvent::Keyboard
@@ -4060,6 +4057,22 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		if (const auto view = viewForItem(_accessibilityFocusedItem)) {
 			_overElement = view;
 		}
+	}
+
+	if (!controllerOrNull()) {
+		const auto item = _overItemExact ? _overItemExact
+			: _overElement ? _overElement->data().get() : nullptr;
+		if (item) {
+			_menu = base::make_unique_q<Ui::PopupMenu>(this, st::popupMenuWithIcons);
+			const auto items = (_overState.pointState == PointState::GroupPart)
+				? HistoryItemsList{ not_null{ item } }
+				: session().data().idsToItems(session().data().itemOrItsGroup(item));
+			AddMessageShareAction(_menu, Main::MakeSessionShow(_delegate->listUiShow(), &session()), items);
+			if (!_menu->empty()) {
+				_menu->popup(e->globalPos());
+			}
+		}
+		return;
 	}
 
 	const auto link = ClickHandler::getActive();

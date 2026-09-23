@@ -56,6 +56,7 @@ struct SharedContact final {
 	QString firstName;
 	QString lastName;
 	QString phoneNumber;
+	QString vcard;
 
 	enum class VcardItemType {
 		Phone,
@@ -428,7 +429,7 @@ public:
 		const QString &firstName,
 		const QString &lastName,
 		const QString &phoneNumber,
-		const SharedContact::VcardItems &vcardItems);
+		const QString &vcard);
 	~MediaContact();
 
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
@@ -469,6 +470,7 @@ public:
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
 	CloudImage *location() const override;
+	[[nodiscard]] MTPInputMedia copyInputMedia() const;
 	ItemPreview toPreview(ToPreviewOptions options) const override;
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;

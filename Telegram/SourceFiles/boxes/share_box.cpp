@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_premium.h"
 #include "api/api_sending.h"
-#include "api/api_as_copy.h"
 #include "base/call_delayed.h"
 #include "base/random.h"
 #include "lang/lang_keys.h"
@@ -553,14 +552,17 @@ SendMenu::Details ShareBox::sendMenuDetails() const {
 	return { .type = type, .effectAllowed = false };
 }
 
-void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
+void ShareBox::showMenu(
+		not_null<Ui::RpWidget*> parent,
+		bool asCopy,
+		bool emptyText) {
 	if (_menu) {
 		_menu = nullptr;
 		return;
 	}
 	_menu.emplace(parent, st::popupMenuWithIcons);
 
-	if (_descriptor.forwardOptions.show) {
+	if (!asCopy && _descriptor.forwardOptions.show) {
 		auto createView = [&](rpl::producer<QString> &&text, bool checked) {
 			auto item = base::make_unique_q<Menu::ItemWithCheck>(
 				_menu->menu(),
@@ -581,7 +583,10 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 		Ui::FillForwardOptions(
 			std::move(createView),
 			_forwardOptions,
-			[=](Ui::ForwardOptions value) { _forwardOptions = value; },
+			[=](Ui::ForwardOptions value) {
+				_forwardOptions = value;
+				computeStarsCount();
+			},
 			_menu->lifetime());
 
 		_menu->addSeparator();
@@ -590,7 +595,7 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 	using namespace SendMenu;
 	const auto sendAction = crl::guard(this, [=](Action action, Details) {
 		if (action.type == ActionType::Send) {
-			submit(action.options);
+			submit(action.options, asCopy, emptyText);
 			return;
 		}
 		const auto st = _descriptor.st.scheduleBox
@@ -601,7 +606,9 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 				this,
 				_descriptor.session,
 				sendMenuDetails(),
-				[=](Api::SendOptions options) { submit(options); },
+				[=](Api::SendOptions options) {
+					submit(options, asCopy, emptyText);
+				},
 				action.options,
 				HistoryView::DefaultScheduleTime(),
 				st));
@@ -621,22 +628,6 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 }
 
 void ShareBox::createButtons() {
-	const auto asCopyShare = [=](bool emptyText, TimeId scheduled) {
-		if (!_descriptor.asCopyCallback) {
-			return;
-		}
-		const auto selected = _inner->selected();
-		_descriptor.asCopyCallback(
-			ranges::views::all(
-				selected
-			) | ranges::views::transform(
-				&Data::Thread::peer
-			) | ranges::to_vector,
-			_comment->entity()->getTextWithAppliedMarkdown(),
-			emptyText,
-			scheduled);
-		closeBox();
-	};
 	clearButtons();
 	if (_hasSelected) {
 		const auto send = addButton(tr::lng_share_confirm(), [=] {
@@ -657,21 +648,33 @@ void ShareBox::createButtons() {
 		send->setText(PaidSendButtonText(
 			_starsToSend.value(),
 			tr::lng_share_confirm()));
-		addButton(tr::lng_share_as_copy(), [=] { asCopyShare(false, 0); });
-		addButton(tr::lng_share_as_copy_no_text(), [=] { asCopyShare(true, 0); });
-		addTopButton(st::historyScheduledToggle, [=] {
-			const auto window = Core::App().findWindow(this);
-			const auto controller = window ? window->sessionController() : nullptr;
-			if (!controller) {
-				return;
-			}
-			uiShow()->show(
-				HistoryView::PrepareScheduleBox(
+		if (_descriptor.asCopyCallback) {
+			const auto addCopyButton = [&](rpl::producer<QString> text, bool empty) {
+				const auto button = addButton(std::move(text), [=] {
+					submit({ .silent = base::IsCtrlPressed() }, true, empty);
+				});
+				button->setAcceptBoth();
+				button->clicks() | rpl::on_next([=](Qt::MouseButton mouseButton) {
+					if (mouseButton == Qt::RightButton) {
+						showMenu(button, true, empty);
+					}
+				}, button->lifetime());
+			};
+			addCopyButton(tr::lng_share_as_copy(), false);
+			addCopyButton(tr::lng_forward_action_hide_captions(), true);
+			addTopButton(st::historyScheduledToggle, [=] {
+				uiShow()->show(HistoryView::PrepareScheduleBox(
 					this,
-					controller->uiShow(),
-					SendMenu::Details(),
-					[=](Api::SendOptions options) { asCopyShare(false, options.scheduled); }));
-		});
+					_descriptor.session,
+					sendMenuDetails(),
+					[=](Api::SendOptions options) { submit(options, true); },
+					Api::SendOptions(),
+					HistoryView::DefaultScheduleTime(),
+					_descriptor.st.scheduleBox
+						? *_descriptor.st.scheduleBox
+						: HistoryView::ScheduleBoxStyleArgs()));
+			});
+		}
 	} else if (_descriptor.copyCallback) {
 		addButton(_copyLinkText.value(), [=] { copyLink(); });
 	}
@@ -717,7 +720,10 @@ void ShareBox::innerSelectedChanged(
 	update();
 }
 
-void ShareBox::submit(Api::SendOptions options) {
+void ShareBox::submit(
+		Api::SendOptions options,
+		bool asCopy,
+		bool emptyText) {
 	_submitLifetime.destroy();
 
 	auto threads = _inner->selected();
@@ -731,17 +737,26 @@ void ShareBox::submit(Api::SendOptions options) {
 		const auto withPaymentApproved = crl::guard(weak, [=](int approved) {
 			auto copy = options;
 			copy.starsApproved = approved;
-			submit(copy);
+			submit(copy, asCopy, emptyText);
 		});
-		const auto messagesCount = _descriptor.countMessagesCallback(
-			comment);
+		auto messagesCount = _descriptor.preparedCountMessagesCallback
+			? 0
+			: (asCopy && _descriptor.copyCountMessagesCallback)
+			? _descriptor.copyCountMessagesCallback(comment, emptyText)
+			: _descriptor.countMessagesCallback(comment);
 		const auto alreadyApproved = options.starsApproved;
 		auto paid = std::vector<not_null<PeerData*>>();
 		auto waiting = base::flat_set<not_null<PeerData*>>();
 		auto totalStars = 0;
 		for (const auto &thread : threads) {
 			const auto peer = thread->peer();
-			const auto details = ComputePaymentDetails(peer, messagesCount);
+			const auto count = _descriptor.preparedCountMessagesCallback
+				? _descriptor.preparedCountMessagesCallback(
+					thread, comment, asCopy, emptyText,
+					_descriptor.forwardOptions.show && _forwardOptions.dropCaptions)
+				: messagesCount;
+			messagesCount = std::max(messagesCount, count);
+			const auto details = ComputePaymentDetails(peer, count);
 			if (!details) {
 				waiting.emplace(peer);
 			} else if (details->stars > 0) {
@@ -785,7 +800,10 @@ void ShareBox::submit(Api::SendOptions options) {
 		}
 		return true;
 	};
-	if (const auto onstack = _descriptor.submitCallback) {
+	if (asCopy && _descriptor.asCopyCallback) {
+		const auto onstack = _descriptor.asCopyCallback;
+		onstack(std::move(threads), checkPaid, std::move(comment), options, emptyText);
+	} else if (const auto onstack = _descriptor.submitCallback) {
 		const auto forwardOptions = !_descriptor.forwardOptions.show
 			? Data::ForwardOptions::PreserveInfo
 			: (_forwardOptions.captionsCount
@@ -822,6 +840,19 @@ void ShareBox::selectedChanged() {
 }
 
 void ShareBox::computeStarsCount() {
+	if (_descriptor.preparedCountMessagesCallback) {
+		const auto comment = _comment
+			? _comment->entity()->getTextWithTags() : TextWithTags();
+		auto stars = 0;
+		for (const auto thread : _inner->selected()) {
+			stars += thread->peer()->starsPerMessageChecked()
+				* _descriptor.preparedCountMessagesCallback(
+					thread, comment, false, false,
+					_descriptor.forwardOptions.show && _forwardOptions.dropCaptions);
+		}
+		_starsToSend = stars;
+		return;
+	}
 	auto perMessage = 0;
 	for (const auto &thread : _inner->selected()) {
 		perMessage += thread->peer()->starsPerMessageChecked();
@@ -2105,129 +2136,11 @@ void FastShareMessage(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<HistoryItem*> item,
 		ShareBoxStyleOverrides st) {
-	const auto history = item->history();
-	const auto owner = &history->owner();
-	const auto session = &history->session();
-	const auto msgIds = owner->itemOrItsGroup(item);
-	const auto isGame = item->getMessageBot()
-		&& item->media()
-		&& (item->media()->game() != nullptr);
-	const auto canCopyLink = item->hasDirectLink() || isGame;
-
-	const auto items = owner->idsToItems(msgIds);
-	const auto hasCaptions = ranges::any_of(items, [](auto item) {
-		return item->media()
-			&& !item->originalText().text.isEmpty()
-			&& item->media()->allowsEditCaption();
-	});
-	const auto hasOnlyForcedForwardedInfo = hasCaptions
-		? false
-		: ranges::all_of(items, [](auto item) {
-			return item->media() && item->media()->forceForwardedInfo();
-		});
-	const auto canShowRichForwardOptions
-		= !HistoryView::Controls::HasRichPage(items)
-		|| HistoryView::Controls::CanHideForwardAuthor(session, items);
-
-	auto copyCallback = [=] {
-		const auto item = owner->message(msgIds[0]);
-		if (!item) {
-			return;
-		}
-		if (item->hasDirectLink()) {
-			using namespace HistoryView;
-			CopyPostLink(show, item->fullId(), Context::History);
-		} else if (const auto bot = item->getMessageBot()) {
-			if (const auto media = item->media()) {
-				if (const auto game = media->game()) {
-					const auto link = session->createInternalLinkFull(
-						bot->username() + u"?game="_q + game->shortName);
-
-					QGuiApplication::clipboard()->setText(link);
-
-					show->showToast({
-						.text = {
-							tr::lng_share_game_link_copied(tr::now),
-						},
-						.iconLottie = u"toast/voip_invite"_q,
-						.iconLottieSize = st::toastLottieIconSize,
-					});
-				}
-			}
-		}
-	};
-
-	auto asCopyCallback = [=, msgIds = owner->itemOrItsGroup(item)](
-			std::vector<not_null<PeerData*>> &&result,
-			TextWithTags &&comment,
-			bool emptyText,
-			TimeId scheduled) {
-		auto toSend = Api::AsCopy::ToSend{
-			.peers = std::move(result),
-			.comment = std::move(comment),
-			.emptyText = emptyText,
-			.silent = QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier),
-			.scheduled = scheduled,
-		};
-		const auto toast = (toSend.silent && toSend.scheduled)
-			? u"Silently scheduled."_q
-			: toSend.silent
-			? u"Silently."_q
-			: toSend.scheduled
-			? u"Scheduled."_q
-			: QString();
-		if (!toast.isEmpty()) {
-			show->showToast(toast);
-		}
-		if (item->groupId()) {
-			Api::AsCopy::GuardedSendExistingAlbumFromItem(item, std::move(toSend));
-		} else if (const auto i = history->owner().message(msgIds[0])) {
-			Api::AsCopy::UpdateFileRef(
-				{ i },
-				[=, toSend = std::move(toSend)] {
-					Api::AsCopy::SendExistingMediaFromItem(i, base::duplicate(toSend));
-				},
-				[=](QString a) { show->showToast(a); });
-		}
-	};
-
-	const auto requiredRight = item->requiredSendRight();
-	const auto requiresInline = item->requiresSendInlineRight();
-	auto filterCallback = [=](not_null<Data::Thread*> thread) {
-		if (const auto user = thread->peer()->asUser()) {
-			if (user->canSendIgnoreMoneyRestrictions()) {
-				return true;
-			}
-		}
-		return Data::CanSend(thread, requiredRight)
-			&& (!requiresInline
-				|| Data::CanSend(thread, ChatRestriction::SendInline))
-			&& (!isGame || !thread->peer()->isBroadcast());
-	};
-	auto copyLinkCallback = canCopyLink
-		? Fn<void()>(std::move(copyCallback))
-		: Fn<void()>();
-	show->show(Box<ShareBox>(ShareBox::Descriptor{
-		.session = session,
-		.copyCallback = std::move(copyLinkCallback),
-		.countMessagesCallback = ShareBox::DefaultForwardCountMessages(
-			history,
-			msgIds),
-		.submitCallback = ShareBox::DefaultForwardCallback(
-			show,
-			history,
-			msgIds),
-		.filterCallback = std::move(filterCallback),
-		.asCopyCallback = std::move(asCopyCallback),
-		.st = st,
-		.forwardOptions = {
-			.sendersCount = ItemsForwardSendersCount(items),
-			.captionsCount = ItemsForwardCaptionsCount(items),
-			.show = !hasOnlyForcedForwardedInfo
-				&& canShowRichForwardOptions,
-		},
-		.moneyRestrictionError = ShareMessageMoneyRestrictionError(),
-	}), Ui::LayerOption::CloseOther);
+	const auto owner = &item->history()->owner();
+	ShareMessages(
+		std::move(show),
+		owner->idsToItems(owner->itemOrItsGroup(item)),
+		st);
 }
 
 void FastShareMessageToSelf(

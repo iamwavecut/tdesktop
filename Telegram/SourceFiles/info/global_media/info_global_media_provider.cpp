@@ -145,7 +145,7 @@ Provider::Type Provider::type() {
 }
 
 bool Provider::hasSelectRestriction() {
-	return true;
+	return bool(_session->frozen());
 }
 
 rpl::producer<bool> Provider::hasSelectRestrictionChanges() {
