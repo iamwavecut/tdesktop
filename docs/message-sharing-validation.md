@@ -133,8 +133,8 @@ of media references copied between accounts remains part of live verification.
 ## Requested Release deployment (2026-09-22)
 
 The Release build and message-share tests passed. The fully packaged bundle
-replaced `/Applications/Forkgram.app`; the previous bundle is retained at
-`/Applications/Forkgram-backup.x7aDjB/Forkgram.app`. All 196 Mach-O files were
+replaced `/Applications/Forkgram.app`; its temporary backup was removed after
+deployment. All 196 Mach-O files were
 checked: no Homebrew or local-prefix dependencies remain. Public bundle access
 and the deep strict signature passed. Source and installed executable SHA-256:
 `dbfc54ba1333eef9b2becb0c817522682691badc3caee5f1e14e7a31f436c312`.
