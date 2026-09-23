@@ -42,6 +42,7 @@ The successful result was:
 ## Quick rules
 
 - Build from the repository root.
+- Follow [shared macOS installation](../../../Telegram/build/mac_forkgram_install.md): use `umask 022`, finalize all bundle permissions before signing, and require non-owner access/signature/GUI verification after every install.
 - Pull latest first if the user asked for it.
 - Do not use `force` with `Telegram/configure.sh` once `out/macos-local` exists. `force` clears most of `out/` and will wipe the local dependency prefix.
 - Use `-DTDESKTOP_API_TEST=ON` for a local non-deployment build unless the user provides real API credentials.
@@ -267,7 +268,7 @@ Expected output location:
 After one full packaged install exists in `/Applications/Forkgram.app`, routine C++/UI iterations do not need to rerun `macdeployqt`, copy all frameworks, or deep-sign the entire bundle. Use the local helper:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh
+Telegram/build/mac_fast_install_forkgram.sh --verify-user wcard
 ```
 
 What it does:
@@ -277,17 +278,17 @@ What it does:
 - refuses to replace the app while `Forkgram` is running
 - copies only `out/Release/Forkgram.app/Contents/MacOS/Forkgram`
 - rewrites `/opt/homebrew` and `out/macos-local/prefix` executable deps to the already bundled `Contents/Frameworks` paths, preserving Qt framework paths
-- signs the executable and the outer app bundle, verifies them with shallow `codesign --verify --strict --verbose=1`, checks the installed executable for leftover absolute local deps, and prints source/installed SHA-256 hashes for traceability. The hashes can differ because the installed executable is rewritten and signed.
+- normalizes all bundle permissions with `chmod -R a+rX`, signs the executable and the outer app bundle, always verifies with `codesign --verify --deep --strict`, checks access and a stable GUI window as the required non-owner `--verify-user`, checks the installed executable for leftover absolute local deps, and prints source/installed SHA-256 hashes for traceability. The hashes can differ because the installed executable is rewritten and signed.
 
 Useful options:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh --skip-build
-Telegram/build/mac_fast_install_forkgram.sh --copy-resources
-Telegram/build/mac_fast_install_forkgram.sh --deep-sign
+Telegram/build/mac_fast_install_forkgram.sh --skip-build --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh --copy-resources --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh --deep-sign --verify-user wcard
 ```
 
-Use `--copy-resources` when the Release build updated app resources that are not embedded in the executable. Use `--deep-sign` for a stronger but slower local check when time is less important. If the installed app is missing, does not contain bundled frameworks/plugins, or the helper reports missing bundled dependencies, run the full packaging/install flow below.
+Use `--copy-resources` when the Release build updated app resources that are not embedded in the executable. Use `--deep-sign` to refresh nested signatures; deep verification is mandatory in every mode. Replace `wcard` with the appropriate logged-in non-owner user on another machine. If the installed app is missing, does not contain bundled frameworks/plugins, or the helper reports missing bundled dependencies, run the full packaging/install flow below.
 
 ## Release packaging and DMG
 
@@ -298,6 +299,8 @@ The raw `Release/Forkgram.app` is not portable right after the build. It still l
 Run `macdeployqt` from the repository root:
 
 ```bash
+set -euo pipefail
+umask 022
 macdeployqt out/Release/Forkgram.app \
   -verbose=1 \
   -always-overwrite \
@@ -336,6 +339,8 @@ One local run still left a few bundled libraries and frameworks with absolute Ho
 Patch them and then re-sign the app:
 
 ```bash
+set -euo pipefail
+umask 022
 install_name_tool -id @executable_path/../Frameworks/libbrotlicommon.1.dylib \
   out/Release/Forkgram.app/Contents/Frameworks/libbrotlicommon.1.dylib
 
@@ -354,7 +359,7 @@ install_name_tool -id @executable_path/../Frameworks/QtNetwork.framework/Version
 install_name_tool -id @executable_path/../Frameworks/QtSvg.framework/Versions/A/QtSvg \
   out/Release/Forkgram.app/Contents/Frameworks/QtSvg.framework/Versions/A/QtSvg
 
-codesign --force --deep --sign - out/Release/Forkgram.app
+python3 Telegram/build/mac_forkgram_bundle.py finalize out/Release/Forkgram.app --deep-sign
 ```
 
 ### 2a. If `libqwebp.dylib` is missing, bundle it manually
@@ -362,6 +367,8 @@ codesign --force --deep --sign - out/Release/Forkgram.app
 This fallback was needed locally when `qtimageformats` was installed after the first packaging attempt.
 
 ```bash
+set -euo pipefail
+umask 022
 cp -f /opt/homebrew/share/qt/plugins/imageformats/libqwebp.dylib \
   out/Release/Forkgram.app/Contents/PlugIns/imageformats/
 
@@ -416,15 +423,15 @@ install_name_tool -change /opt/homebrew/opt/webp/lib/libsharpyuv.0.dylib \
   @executable_path/../Frameworks/libsharpyuv.0.dylib \
   out/Release/Forkgram.app/Contents/PlugIns/imageformats/libqwebp.dylib
 
-codesign --force --deep --sign - out/Release/Forkgram.app
+python3 Telegram/build/mac_forkgram_bundle.py finalize out/Release/Forkgram.app --deep-sign
 ```
 
 ### 3. Verify the packaged app
 
-Verify the final ad-hoc signature:
+After all copying and binary edits, normalize the validated bundle and verify its final ad-hoc signature:
 
 ```bash
-codesign --verify --deep --strict --verbose=2 out/Release/Forkgram.app
+python3 Telegram/build/mac_forkgram_bundle.py finalize out/Release/Forkgram.app --deep-sign
 ```
 
 The proven result was:
@@ -455,19 +462,19 @@ Expected result:
 
 Do this only if user asks you to, after the packaged `out/Release/Forkgram.app` passes the verification steps above.
 
-If `/Applications/Forkgram.app` is running, close it first. Then replace the installed bundle from the repository root:
+Once packaging is complete, close Forkgram in all user sessions. Install from the repository root; the helper retains the old bundle and requires non-owner verification:
 
 ```bash
-rm -rf /Applications/Forkgram.app
-ditto out/Release/Forkgram.app /Applications/Forkgram.app
-codesign --verify --deep --strict --verbose=2 /Applications/Forkgram.app
+bash Telegram/build/mac_install_forkgram.sh --verify-user wcard
 ```
 
 Expected result:
 
 - `/Applications/Forkgram.app` exists
-- the installed bundle passes `codesign --verify`
-- the next launch uses the freshly packaged `Release` build
+- the entire installed bundle is readable/traversable by other local users
+- the installed bundle passes `codesign --verify --deep --strict`
+- the freshly packaged executable opens a stable GUI window as `wcard`
+- access, signature, unavailable cross-user execution, or GUI failures leave deployment unsuccessful; finish verification from the other user's Terminal as described in [the installation guide](../../../Telegram/build/mac_forkgram_install.md)
 
 If that scan still prints only `out/Release/Forkgram.app/Contents/MacOS/Forkgram`, rewrite each leftover `/opt/homebrew/...` dependency to the matching `@executable_path/../Frameworks/...` path, then re-sign again. This happened locally after a fresh `Release` relink.
 
@@ -478,9 +485,12 @@ If that scan still prints only `out/Release/Forkgram.app/Contents/MacOS/Forkgram
 Create a simple install DMG with the app and an `Applications` symlink:
 
 ```bash
+set -euo pipefail
+umask 022
 rm -rf out/Release/dmg-root
 mkdir -p out/Release/dmg-root
 cp -R out/Release/Forkgram.app out/Release/dmg-root/Forkgram.app
+python3 Telegram/build/mac_forkgram_bundle.py finalize out/Release/dmg-root/Forkgram.app --deep-sign
 ln -s /Applications out/Release/dmg-root/Applications
 
 hdiutil create \

@@ -18,6 +18,8 @@ on:
       - '!lib/xdg/**'
       - '!snap/**'
       - '!Telegram/build/**'
+      - 'Telegram/build/mac_forkgram_bundle.py'
+      - 'Telegram/build/mac_forkgram_bundle_test.py'
       - 'Telegram/build/version'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
@@ -38,6 +40,8 @@ on:
       - '!lib/xdg/**'
       - '!snap/**'
       - '!Telegram/build/**'
+      - 'Telegram/build/mac_forkgram_bundle.py'
+      - 'Telegram/build/mac_forkgram_bundle_test.py'
       - 'Telegram/build/version'
       - '!Telegram/Resources/uwp/**'
       - '!Telegram/Resources/winrc/**'
@@ -184,7 +188,10 @@ jobs:
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
+          set -euo pipefail
+          umask 022
           cd $REPO_NAME
+          python3 Telegram/build/mac_forkgram_bundle_test.py
           export CMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH$(find $LibrariesPath/local -mindepth 1 -maxdepth 1 -type d -exec printf ':%s' {} +)"
 
           DEFINE=""
@@ -208,12 +215,13 @@ jobs:
             exit 1
           fi
           macdeployqt "$APP_BUNDLE"
-          codesign --force --deep --sign - "$APP_BUNDLE"
-          codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+          python3 Telegram/build/mac_forkgram_bundle.py finalize "$APP_BUNDLE" --deep-sign
 
       - name: Package DMG.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
+          set -euo pipefail
+          umask 022
           cd $REPO_NAME/build
           rm -rf artifact dmg-root
           mkdir artifact dmg-root
@@ -223,6 +231,7 @@ jobs:
             exit 1
           fi
           cp -R "$APP_BUNDLE" "dmg-root/$(basename "$APP_BUNDLE")"
+          python3 ../Telegram/build/mac_forkgram_bundle.py finalize "dmg-root/$(basename "$APP_BUNDLE")" --deep-sign
           ln -s /Applications dmg-root/Applications
           ARCH="$(uname -m)"
           DMG_NAME="Forkgram-macos-$ARCH.dmg"
