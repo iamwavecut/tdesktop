@@ -655,6 +655,9 @@ void ShortcutMessages::setupComposeControls() {
 	_composeControls->setHistory({
 		.history = _history.get(),
 		.sendActionFactory = [=] { return prepareSendAction({}); },
+		.sendActionWithOptionsFactory = [=](Api::SendOptions options) {
+			return prepareSendAction(options);
+		},
 		.writeRestriction = std::move(writeRestriction),
 	});
 
@@ -1203,7 +1206,8 @@ Api::SendAction ShortcutMessages::prepareSendAction(
 }
 
 void ShortcutMessages::send() {
-	if (_composeControls->getTextWithAppliedMarkdown().text.isEmpty()) {
+	if (_composeControls->getTextWithAppliedMarkdown().text.isEmpty()
+		&& !_composeControls->extractMediaActive()) {
 		return;
 	}
 	send({});
@@ -1228,6 +1232,9 @@ void ShortcutMessages::sendVoice(ComposeControls::VoiceToSend &&data) {
 
 void ShortcutMessages::send(Api::SendOptions options) {
 	if (showPremiumRequired()) {
+		return;
+	}
+	if (_composeControls->trySendExtractedMedia(options)) {
 		return;
 	}
 	_cornerButtons.clearReplyReturns();

@@ -371,6 +371,9 @@ void ScheduledWidget::setupComposeControls() {
 	_composeControls->setHistory({
 		.history = _history.get(),
 		.sendActionFactory = [=] { return prepareSendAction({}); },
+		.sendActionWithOptionsFactory = [=](Api::SendOptions options) {
+			return prepareSendAction(options);
+		},
 		.writeRestriction = std::move(writeRestriction),
 	});
 
@@ -747,7 +750,9 @@ Api::SendAction ScheduledWidget::prepareSendAction(
 
 void ScheduledWidget::send() {
 	const auto textWithTags = _composeControls->getTextWithAppliedMarkdown();
-	if (textWithTags.text.isEmpty() && !_composeControls->readyToForward()) {
+	if (textWithTags.text.isEmpty()
+		&& !_composeControls->readyToForward()
+		&& !_composeControls->extractMediaActive()) {
 		return;
 	}
 
@@ -773,6 +778,9 @@ void ScheduledWidget::send() {
 }
 
 void ScheduledWidget::send(Api::SendOptions options) {
+	if (_composeControls->trySendExtractedMedia(options)) {
+		return;
+	}
 	const auto webPageDraft = _composeControls->webPageDraft();
 
 	auto message = Api::MessageToSend(prepareSendAction(options));

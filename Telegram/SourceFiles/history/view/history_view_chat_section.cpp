@@ -592,7 +592,6 @@ ChatWidget::ChatWidget(
 			.repliesRootId = _repliesRootId,
 			.topic = _topic,
 			.sublist = _sublist,
-			.monoforumPeerId = _monoforumPeerId,
 			.scroll = _scroll.get(),
 			.list = _inner.data(),
 			.keyboardReservedHeight = [=] {
@@ -1335,7 +1334,7 @@ void ChatWidget::subscribeToTopic() {
 void ChatWidget::closeCurrent() {
 	const auto thread = controller()->windowId().chat();
 	if ((_sublist && thread == _sublist) || (_topic && thread == _topic)) {
-		controller()->window().close();
+		Core::App().closeWindow(&controller()->window());
 	} else {
 		controller()->showBackFromStack(Window::SectionShow(
 			anim::type::normal,
@@ -1583,6 +1582,15 @@ void ChatWidget::setupComposeControls() {
 		.showSlowmodeError = [=] { return showSlowmodeError(); },
 		.showScheduleSendError = [=] { return showScheduleSendError(); },
 		.sendActionFactory = [=] { return prepareSendAction({}); },
+		.sendActionWithOptionsFactory = [=](Api::SendOptions options) {
+			return prepareSendAction(options);
+		},
+		.checkSendPayment = [=](
+				int count,
+				Api::SendOptions options,
+				Fn<void(int)> done) {
+			return checkSendPayment(count, options, std::move(done));
+		},
 		.sendWithText = [=](
 				TextWithEntities &&text,
 				Api::SendOptions options,
@@ -2404,6 +2412,10 @@ void ChatWidget::send(Api::SendOptions options) {
 			&& showSlowmodeError()) {
 			return;
 		}
+	}
+
+	if (_composeControls->trySendExtractedMedia(options)) {
+		return;
 	}
 
 	sendTextWithTags(
@@ -5932,7 +5944,7 @@ void ChatWidget::listOpenPhoto(
 		photo,
 		{
 			context,
-			(item && !_monoforumPeerId)
+			(item && _peer->isForum())
 				? item->topicRootId()
 				: _repliesRootId,
 			_monoforumPeerId,
@@ -5954,7 +5966,7 @@ void ChatWidget::listOpenDocument(
 		showInMediaView,
 		{
 			context,
-			(item && !_monoforumPeerId)
+			(item && _peer->isForum())
 				? item->topicRootId()
 				: _repliesRootId,
 			_monoforumPeerId,

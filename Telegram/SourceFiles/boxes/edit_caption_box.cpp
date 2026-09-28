@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/photo_editor.h"
 #include "editor/photo_editor_layer_widget.h"
 #include "editor/video/video_editor_layer.h"
+#include "forkgram/link_replacements.h"
 #include "history/history_drag_area.h"
 #include "history/history_item.h"
 #include "history/history.h"
