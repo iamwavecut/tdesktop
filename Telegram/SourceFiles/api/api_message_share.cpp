@@ -611,6 +611,21 @@ void OpenShare(
 			*status = tr::lng_share_text_fallback(tr::now);
 			return;
 		}
+		if (mode == Mode::WithoutCaptions) {
+			const auto remove = comment.text.size()
+				- Data::PremiumLimits(session).captionLengthCurrent();
+			const auto hasMedia = ranges::any_of(current, [](const Source &source) {
+				return (source.media && source.caption)
+					|| ranges::any_of(source.richParts, [](const Source &part) {
+						return part.media && part.caption;
+					});
+			});
+			if (remove > 0 && hasMedia) {
+				show->showToast(tr::lng_caption_limit_reached(
+					tr::now, lt_count, remove));
+				return;
+			}
+		}
 		auto jobs = std::vector<Job>();
 		for (const auto thread : threads) {
 			const auto parts = PrepareParts(

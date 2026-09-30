@@ -2,6 +2,7 @@
 
 #include "ui/text/text_utilities.h"
 
+#include <algorithm>
 #include <set>
 #include <tuple>
 
@@ -30,9 +31,16 @@ std::vector<PreparedContent> PrepareContent(
 			}
 		}
 	};
-	if (!comment.empty()) {
+	const auto replaceCaption = (mode == Mode::WithoutCaptions)
+		&& !comment.empty()
+		&& comment.text.size() <= captionLimit
+		&& std::any_of(sources.begin(), sources.end(), [](const Content &source) {
+			return source.media && source.caption;
+		});
+	if (!comment.empty() && !replaceCaption) {
 		addText(kCommentSource, std::move(comment));
 	}
+	auto captionReplaced = false;
 	for (auto i = std::size_t(0); i != sources.size(); ++i) {
 		const auto &source = sources[i];
 		if (mode == Mode::Automatic && source.forward
@@ -41,6 +49,10 @@ std::vector<PreparedContent> PrepareContent(
 		} else if (source.media) {
 			auto text = ((mode == Mode::WithoutCaptions || dropCaptions) && source.caption)
 				? TextWithEntities() : source.text;
+			if (replaceCaption && !captionReplaced && source.caption) {
+				text = std::move(comment);
+				captionReplaced = true;
+			}
 			if (text.text.size() > captionLimit) {
 				result.push_back({ i, Delivery::Media, {} });
 				captions.emplace_back(i, std::move(text));

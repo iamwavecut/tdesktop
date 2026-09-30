@@ -1516,7 +1516,7 @@ void AddTopMessageActions(
 	AddViewStatisticsAction(menu, request, list);
 }
 
-void AddMessageActions(
+void AddMessageShareForRequest(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
 		not_null<ListWidget*> list) {
@@ -1531,6 +1531,12 @@ void AddMessageActions(
 			: owner.idsToItems(owner.itemOrItsGroup(request.item));
 	}
 	AddMessageShareAction(menu, list->controller()->uiShow(), std::move(shareItems));
+}
+
+void AddMessageActions(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
 	AddPostLinkAction(menu, request);
 	AddForwardAction(menu, request, list);
 	AddOfferAction(menu, request, list);
@@ -2157,6 +2163,7 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 				});
 		});
 	}
+	AddMessageShareForRequest(result, request, list);
 	return result;
 }
 

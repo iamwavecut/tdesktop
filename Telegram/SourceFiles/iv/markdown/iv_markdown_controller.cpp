@@ -956,7 +956,12 @@ void Controller::showMenu() {
 			OpenSourceIcon(viewerKind()));
 	}
 
+	if (hasOpenSource) {
+		_menu->addSeparator();
+	}
+	_menu->addAction(CreateZoomMenuAction(_menu->menu(), _delegate));
 	if (canShare()) {
+		_menu->addSeparator();
 		_menu->addAction(
 			tr::lng_iv_share(tr::now),
 			crl::guard(_window.get(), [=, share = _options.share] {
@@ -964,11 +969,6 @@ void Controller::showMenu() {
 			}),
 			&st::menuIconShare);
 	}
-
-	if (hasOpenSource || canShare()) {
-		_menu->addSeparator();
-	}
-	_menu->addAction(CreateZoomMenuAction(_menu->menu(), _delegate));
 
 	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 	_menu->popup(_window->body()->mapToGlobal(

@@ -2283,18 +2283,20 @@ void OverlayWidget::refreshPollVotersWidgetGeometry() {
 
 void OverlayWidget::fillContextMenuActions(
 		const Ui::Menu::MenuCallback &addAction) {
-	if (CanShareMessage(_message)) {
-		if (const auto window = findWindow()) {
-			auto share = PrepareMessageShare(window->uiShow(), { not_null{ _message } }, DarkShareBoxStyle());
-			addAction(tr::lng_background_share(tr::now), crl::guard(_widget, [=] {
-				const auto onstack = share;
-				if (!_windowed) {
-					close();
-				}
-				onstack();
-			}), &st::mediaMenuIconShare);
+	const auto addMessageShare = [&] {
+		if (CanShareMessage(_message)) {
+			if (const auto window = findWindow()) {
+				auto share = PrepareMessageShare(window->uiShow(), { not_null{ _message } }, DarkShareBoxStyle());
+				addAction(tr::lng_background_share(tr::now), crl::guard(_widget, [=] {
+					const auto onstack = share;
+					if (!_windowed) {
+						close();
+					}
+					onstack();
+				}), &st::mediaMenuIconShare);
+			}
 		}
-	}
+	};
 
 	if (_message && _message->isSponsored()) {
 		if (const auto window = findWindow()) {
@@ -2306,6 +2308,7 @@ void OverlayWidget::fillContextMenuActions(
 				fullId,
 				{ .dark = true, .skipInfo = true });
 		}
+		addMessageShare();
 		return;
 	}
 	if (_message) {
@@ -2594,6 +2597,7 @@ void OverlayWidget::fillContextMenuActions(
 			_stories->reportRequested();
 		}, &st::mediaMenuIconReport);
 	}
+	addMessageShare();
 }
 
 auto OverlayWidget::computeOverviewType() const

@@ -105,13 +105,24 @@ void TestContentPreparation() {
 	const auto copy = PrepareContent(content, {}, Mode::Copy, 4096, 1024);
 	Require(copy[0].delivery == Delivery::Text && copy[0].text == formatted,
 		"copy mode used native forwarding");
-	const auto without = PrepareContent(content, formatted, Mode::WithoutCaptions, 4096, 1024);
-	Require(without.size() == 5 && without[0].source == kCommentSource,
-		"comment missing or reordered");
-	Require(without[1].text == formatted && without[2].text == formatted,
+	const auto replacement = TextWithEntities{
+		.text = u"My own caption"_q,
+		.entities = { { EntityType::Italic, 0, 2 } },
+	};
+	const auto without = PrepareContent(content, replacement, Mode::WithoutCaptions, 4096, 1024);
+	Require(without.size() == 4 && without[2].source == 2
+		&& without[2].delivery == Delivery::Media,
+		"replacement caption was sent as a separate message");
+	Require(without[0].text == formatted && without[1].text == formatted,
 		"without captions erased standalone text");
-	Require(without[3].text.empty(), "media caption not removed");
-	Require(!without[4].text.empty(), "without captions erased structured fallback");
+	Require(without[2].text == replacement,
+		"typed caption did not replace the original media caption and formatting");
+	Require(!without[3].text.empty(), "without captions erased structured fallback");
+	const auto textOnly = PrepareContent({ content[0] }, replacement,
+		Mode::WithoutCaptions, 4096, 1024);
+	Require(textOnly.size() == 2 && textOnly[0].source == kCommentSource
+		&& textOnly[1].text == formatted,
+		"without media, the typed comment or standalone text was lost");
 	const auto nativeWithout = PrepareContent(content, {}, Mode::Automatic, 4096, 4, true);
 	Require(nativeWithout.size() == 4 && nativeWithout[0].delivery == Delivery::Forward
 		&& nativeWithout[1].text == formatted && nativeWithout[2].text.empty(),
@@ -158,6 +169,11 @@ void TestMixedAlbumPreparation() {
 	const auto album = PrepareContent(sources, {}, Mode::Automatic, 4096, 1024);
 	Require(album.size() == 2 && album[0].delivery == Delivery::Media && album[1].delivery == Delivery::Media,
 		"mixed copy/forward availability broke an album");
+	const auto replacement = TextWithEntities::Simple(u"My album caption"_q);
+	const auto without = PrepareContent(sources, replacement, Mode::WithoutCaptions, 4096, 1024);
+	Require(without.size() == 2 && without[0].text == replacement
+		&& without[1].text.empty(),
+		"typed caption did not replace the first album caption");
 	const auto overflow = PrepareContent(sources, {}, Mode::Copy, 4096, 4);
 	Require(overflow.size() == 3 && overflow[0].delivery == Delivery::Media
 		&& overflow[1].delivery == Delivery::Media && overflow[2].text.text == u"long caption"_q,

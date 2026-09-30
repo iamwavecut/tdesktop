@@ -3963,12 +3963,11 @@ void InnerWidget::contextMenuEvent(QContextMenuEvent *e) {
 		this,
 		row.fullId ? st::popupMenuWithIcons : st::popupMenuExpandedSeparator);
 	if (row.fullId) {
-		if (const auto item = session().data().message(row.fullId)) {
-			AddMessageShareAction(_menu, _controller->uiShow(), { item });
-		}
-
 		if (session().supportMode()) {
 			fillSupportSearchMenu(_menu.get());
+		}
+		if (const auto item = session().data().message(row.fullId)) {
+			AddMessageShareAction(_menu, _controller->uiShow(), { item });
 		}
 	} else {
 		const auto addAction = Ui::Menu::CreateAddActionCallback(_menu);

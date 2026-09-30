@@ -4003,17 +4003,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		});
 	}
 
-	if (isUponSelected == 2) {
-		auto items = HistoryItemsList(_selected.begin(), _selected.end());
-		ranges::sort(items, ranges::less(), &HistoryItem::position);
-		AddMessageShareAction(_menu, controller->uiShow(), std::move(items));
-	} else if (_dragStateItem) {
-		const auto items = asGroup
-			? session->data().idsToItems(session->data().itemOrItsGroup(_dragStateItem))
-			: HistoryItemsList{ not_null{ _dragStateItem } };
-		AddMessageShareAction(_menu, controller->uiShow(), items);
-	}
-
 	if (leaderOrSelf && !_menu->empty()) {
 		const auto media = leaderOrSelf->media();
 		const auto poll = media ? media->poll() : nullptr;
@@ -4026,6 +4015,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				leaderOrSelf,
 				poll);
 		}
+	}
+	if (isUponSelected == 2) {
+		auto items = HistoryItemsList(_selected.begin(), _selected.end());
+		ranges::sort(items, ranges::less(), &HistoryItem::position);
+		AddMessageShareAction(_menu, controller->uiShow(), std::move(items));
+	} else if (_dragStateItem) {
+		const auto items = asGroup
+			? session->data().idsToItems(session->data().itemOrItsGroup(_dragStateItem))
+			: HistoryItemsList{ not_null{ _dragStateItem } };
+		AddMessageShareAction(_menu, controller->uiShow(), items);
 	}
 
 	if (_menu->empty()) {
