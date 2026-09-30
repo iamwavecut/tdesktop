@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_bottom_info.h"
+#include "forkgram/local_message_state.h"
+#include "storage/storage_account.h"
 
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
@@ -554,15 +556,15 @@ void AddRevisionLabel(
 	label->setBreakEverywhere(true);
 }
 
-void MessageRevisionsBox(
+using LoadedRevisionHistory = std::shared_ptr<const HistoryMessageRevisionHistory>;
+
+void LoadedMessageRevisionsBox(
 	not_null<Ui::GenericBox*> box,
-	not_null<Data::Session*> owner,
-	FullMsgId itemId);
+	LoadedRevisionHistory history);
 
 void MessageRevisionDetailsBox(
 	not_null<Ui::GenericBox*> box,
-	not_null<Data::Session*> owner,
-	FullMsgId itemId,
+	LoadedRevisionHistory history,
 	int index);
 
 void ReplaceRevisionBox(
@@ -582,13 +584,10 @@ void AddRevisionCloseButton(not_null<Ui::GenericBox*> box) {
 
 void MessageRevisionDetailsBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<Data::Session*> owner,
-		FullMsgId itemId,
+		LoadedRevisionHistory history,
 		int index) {
 	box->setWidth(st::boxWidth);
 	box->setTitle(RevisionTitle(index));
-	const auto item = owner->message(itemId);
-	const auto history = item ? item->revisionHistory() : nullptr;
 	const auto count = history ? int(history->versions.size()) : 0;
 	if (!history || index < 0 || index >= count) {
 		AddRevisionLabel(
@@ -602,7 +601,7 @@ void MessageRevisionDetailsBox(
 		box,
 		tr::lng_message_versions_back(tr::now)));
 	back->setClickedCallback([=] {
-		ReplaceRevisionBox(box, Box(MessageRevisionsBox, owner, itemId));
+		ReplaceRevisionBox(box, Box(LoadedMessageRevisionsBox, history));
 	});
 	const auto &snapshot = history->versions[index];
 	const auto date = RevisionDate(snapshot);
@@ -631,14 +630,11 @@ void MessageRevisionDetailsBox(
 	AddRevisionCloseButton(box);
 }
 
-void MessageRevisionsBox(
+void LoadedMessageRevisionsBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<Data::Session*> owner,
-		FullMsgId itemId) {
+		LoadedRevisionHistory history) {
 	box->setWidth(st::boxWidth);
 	box->setTitle(tr::lng_message_versions_title(tr::now));
-	const auto item = owner->message(itemId);
-	const auto history = item ? item->revisionHistory() : nullptr;
 	const auto count = history ? int(history->versions.size()) : 0;
 	if (count < 2) {
 		AddRevisionLabel(
@@ -658,10 +654,55 @@ void MessageRevisionsBox(
 		button->setClickedCallback([=] {
 			ReplaceRevisionBox(
 				box,
-				Box(MessageRevisionDetailsBox, owner, itemId, i));
+				Box(MessageRevisionDetailsBox, history, i));
 		});
 	}
 	AddRevisionCloseButton(box);
+}
+
+void MessageRevisionsErrorBox(not_null<Ui::GenericBox*> box) {
+	box->setWidth(st::boxWidth);
+	box->setTitle(tr::lng_message_versions_title(tr::now));
+	AddRevisionLabel(box, tr::lng_passkey_cable_error_title(tr::now));
+	AddRevisionCloseButton(box);
+}
+
+void ShowLoadedMessageRevisions(
+		not_null<Ui::GenericBox*> box,
+		std::optional<Forkgram::LocalMessageState::RevisionEntry> entry) {
+	if (!entry) {
+		ReplaceRevisionBox(box, Box(MessageRevisionsErrorBox));
+		return;
+	}
+	auto history = std::make_shared<HistoryMessageRevisionHistory>();
+	for (auto &snapshot : entry->versions) {
+		history->versions.push_back({
+			.raw = std::move(snapshot.raw),
+			.text = std::move(snapshot.text),
+			.media = std::move(snapshot.media),
+			.date = snapshot.date,
+			.editDate = snapshot.editDate,
+			.entitiesCount = snapshot.entitiesCount,
+		});
+	}
+	ReplaceRevisionBox(
+		box,
+		Box(LoadedMessageRevisionsBox, LoadedRevisionHistory(history)));
+}
+
+void MessageRevisionsBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Data::Session*> owner,
+		FullMsgId itemId) {
+	box->setWidth(st::boxWidth);
+	box->setTitle(tr::lng_message_versions_title(tr::now));
+	AddRevisionLabel(box, tr::lng_contacts_loading(tr::now));
+	AddRevisionCloseButton(box);
+	owner->session().local().forkLocalMessageState().load(
+		itemId,
+		crl::guard(box, [=](std::optional<Forkgram::LocalMessageState::RevisionEntry> entry) {
+			ShowLoadedMessageRevisions(box, std::move(entry));
+		}));
 }
 
 } // namespace

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "storage/storage_account.h"
+#include "forkgram/local_message_state.h"
 
 #include "storage/localstorage.h"
 #include "storage/storage_domain.h"
@@ -189,6 +190,7 @@ Account::Account(not_null<Main::Account*> owner, const QString &dataName)
 }
 
 Account::~Account() {
+	_forkMessageState.reset();
 	Expects(!_writeSearchSuggestionsTimer.isActive());
 
 	if (_localKey) {
@@ -211,6 +213,25 @@ QString Account::supportModePath() const {
 
 QString Account::forkLocalMessageStatePath() const {
 	return _basePath + u"fork_message_state/"_q;
+}
+
+Forkgram::LocalMessageState::Store &Account::forkLocalMessageState() {
+	if (!_forkMessageState) {
+		_forkMessageState = std::make_unique<Forkgram::LocalMessageState::Store>(
+			forkLocalMessageStatePath(),
+			peekLegacyLocalKey(),
+			readMessageRevisions(),
+			readLocallyHiddenMessages(),
+			[=] {
+				if (!readMessageRevisions().isEmpty()) {
+					writeMessageRevisions({});
+				}
+				if (!readLocallyHiddenMessages().isEmpty()) {
+					writeLocallyHiddenMessages({});
+				}
+			});
+	}
+	return *_forkMessageState;
 }
 
 StartResult Account::legacyStart(const QByteArray &passcode) {
@@ -770,6 +791,7 @@ void Account::writeMap() {
 }
 
 void Account::reset() {
+	_forkMessageState.reset();
 	_writeSearchSuggestionsTimer.cancel();
 
 	auto names = collectGoodNames();

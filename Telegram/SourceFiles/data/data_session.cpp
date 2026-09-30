@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
+#include "forkgram/local_message_state.h"
 
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -351,6 +352,18 @@ Session::Session(not_null<Main::Session*> session)
 , _chatbots(std::make_unique<Chatbots>(this))
 , _businessInfo(std::make_unique<BusinessInfo>(this))
 , _shortcutMessages(std::make_unique<ShortcutMessages>(this)) {
+	_session->local().forkLocalMessageState().changes(
+	) | rpl::on_next([=](const std::vector<FullMsgId> &ids) {
+		for (const auto id : ids) {
+			if (const auto item = message(id)) {
+				item->refreshLocalMessageState();
+				requestItemResize(item);
+				notifyItemDataChange(item);
+				_session->changes().messageUpdated(item, MessageUpdate::Flag::Edited);
+			}
+		}
+	}, _lifetime);
+
 	_cache->open(_session->local().cacheKey());
 	_bigFileCache->open(_session->local().cacheBigFileKey());
 

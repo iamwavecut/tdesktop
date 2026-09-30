@@ -153,3 +153,30 @@ PRIVATE
     api/message_share_send.h
 )
 target_link_libraries(test_message_share PRIVATE tdesktop::td_scheme desktop-app::external_zlib desktop-app::lib_ui desktop-app::lib_base desktop-app::external_qt)
+
+add_executable(test_local_message_state)
+init_target(test_local_message_state "(tests)")
+target_include_directories(test_local_message_state PRIVATE ${src_loc})
+target_precompile_headers(test_local_message_state PRIVATE
+    ${src_loc}/logs.h
+    ${src_loc}/mtproto/core_types.h
+    <scheme.h>
+    <crl/crl.h>
+)
+nice_target_sources(test_local_message_state ${src_loc}
+PRIVATE
+    forkgram/local_message_state.cpp
+    forkgram/local_message_state.h
+    mtproto/mtproto_auth_key.cpp
+    tests/test_local_message_state.cpp
+    data/data_peer_id.cpp
+    mtproto/details/mtproto_dump_to_text.cpp
+)
+target_link_libraries(test_local_message_state PRIVATE
+    tdesktop::td_scheme
+    desktop-app::lib_base
+    desktop-app::lib_crl
+    desktop-app::lib_ui
+    desktop-app::external_libsodium
+    desktop-app::external_qt
+)

@@ -39,6 +39,10 @@ class AuthKey;
 using AuthKeyPtr = std::shared_ptr<AuthKey>;
 } // namespace MTP
 
+namespace Forkgram::LocalMessageState {
+class Store;
+} // namespace Forkgram::LocalMessageState
+
 namespace Storage {
 namespace details {
 struct ReadSettingsContext;
@@ -79,6 +83,7 @@ public:
 	[[nodiscard]] QString tempDirectory() const;
 	[[nodiscard]] QString supportModePath() const;
 	[[nodiscard]] QString forkLocalMessageStatePath() const;
+	[[nodiscard]] Forkgram::LocalMessageState::Store &forkLocalMessageState();
 
 	[[nodiscard]] MTP::AuthKeyPtr peekLegacyLocalKey() const {
 		return _localKey;
@@ -398,6 +403,7 @@ private:
 	bool _locationsChanged = false;
 
 	QImage _roundPlaceholder;
+	std::unique_ptr<Forkgram::LocalMessageState::Store> _forkMessageState;
 
 };
 

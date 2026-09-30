@@ -7,6 +7,9 @@ This file is part of Forkgram.
 #include "base/basic_types.h"
 #include "base/flat_map.h"
 #include "base/flat_set.h"
+#include "base/weak_ptr.h"
+#include <rpl/event_stream.h>
+#include <optional>
 #include "core/credits_amount.h"
 #include "scheme.h"
 #include "data/data_msg_id.h"
@@ -45,9 +48,21 @@ struct RevisionEntry {
 using RevisionMap = base::flat_map<FullMsgId, RevisionEntry>;
 using HiddenMap = base::flat_map<FullMsgId, TimeId>;
 
+struct Metadata {
+	int revisionPartition = 0;
+	int hiddenPartition = 0;
+	int versionsCount = 0;
+	TimeId deletedDate = 0;
+};
+
+using MetadataMap = base::flat_map<FullMsgId, Metadata>;
+
 struct Snapshot {
 	RevisionMap revisions;
 	HiddenMap hidden;
+	MetadataMap metadata;
+	bool complete = false;
+	bool valid = true;
 };
 
 [[nodiscard]] inline int PartitionFromDate(TimeId date) {
@@ -81,42 +96,34 @@ struct Snapshot {
 	return PartitionFromDate(date ? date : fallback);
 }
 
-[[nodiscard]] inline bool DeletedEntryExpired(
-		const RevisionEntry &entry,
-		TimeId now) {
-	const auto cutoff = std::max(now, TimeId(1))
-		- TimeId(kDeletedRetentionDays * kSecondsInDay);
-	return entry.deletedDate > 0 && entry.deletedDate <= cutoff;
-}
-
-[[nodiscard]] inline bool PruneExpiredRevisionEntries(
-		RevisionMap &revisions,
-		TimeId now) {
-	const auto cutoff = PartitionCutoff(now, kRevisionRetentionMonths);
-	auto changed = false;
-	for (auto i = revisions.begin(); i != revisions.end();) {
-		if (DeletedEntryExpired(i->second, now)
-			|| (!i->second.deletedDate
-				&& PartitionForRevisionEntry(i->second, now) < cutoff)) {
-			i = revisions.erase(i);
-			changed = true;
-		} else {
-			++i;
-		}
-	}
-	return changed;
-}
-
 [[nodiscard]] Snapshot Read(
 	const QString &path,
 	MTP::AuthKeyPtr localKey);
 
-void WriteAsync(
-	const QString &path,
-	MTP::AuthKeyPtr localKey,
-	const RevisionMap &revisions,
-	const HiddenMap &hidden,
-	const base::flat_set<int> &dirtyPartitions,
-	bool rewriteAll);
+class Store final : public base::has_weak_ptr {
+public:
+	Store(
+		QString path,
+		MTP::AuthKeyPtr localKey,
+		QByteArray legacyRevisions = {},
+		QByteArray legacyHidden = {},
+		Fn<void()> migrated = nullptr);
+	~Store();
+
+	[[nodiscard]] Metadata metadata(FullMsgId id) const;
+	[[nodiscard]] rpl::producer<std::vector<FullMsgId>> changes() const;
+	void load(FullMsgId id, Fn<void(std::optional<RevisionEntry>)> done);
+	void record(FullMsgId id, RevisionSnapshot before, RevisionSnapshot after);
+	void markDeleted(FullMsgId id, RevisionSnapshot snapshot, TimeId date);
+	void hide(FullMsgId id, TimeId date);
+
+private:
+	void initialized(MetadataMap metadata, Fn<void()> migrated);
+	void update(FullMsgId id, Metadata metadata, uint64 generation);
+
+	struct Private;
+	std::unique_ptr<Private> _private;
+
+};
 
 } // namespace Forkgram::LocalMessageState

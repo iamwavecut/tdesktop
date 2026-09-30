@@ -401,6 +401,7 @@ public:
 
 	[[nodiscard]] bool isService() const;
 	void applyLocalMessageState(const MTPMessage &data);
+	void refreshLocalMessageState();
 	void recordEditionSnapshot(const MTPMessage &data);
 	void markDeleted(TimeId date);
 	void hideLocally();
@@ -409,7 +410,6 @@ public:
 	[[nodiscard]] bool canRemoveLocally() const;
 	[[nodiscard]] TimeId deletedDate() const;
 	[[nodiscard]] int editCount() const;
-	[[nodiscard]] const HistoryMessageRevisionHistory *revisionHistory() const;
 	void applyEdition(HistoryMessageEdition &&edition);
 	void applyChanges(not_null<Data::Story*> story);
 
