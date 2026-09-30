@@ -268,7 +268,7 @@ Expected output location:
 After one full packaged install exists in `/Applications/Forkgram.app`, routine C++/UI iterations do not need to rerun `macdeployqt`, copy all frameworks, or deep-sign the entire bundle. Use the local helper:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh
 ```
 
 What it does:
@@ -278,17 +278,17 @@ What it does:
 - refuses to replace the app while `Forkgram` is running
 - copies only `out/Release/Forkgram.app/Contents/MacOS/Forkgram`
 - rewrites `/opt/homebrew` and `out/macos-local/prefix` executable deps to the already bundled `Contents/Frameworks` paths, preserving Qt framework paths
-- normalizes all bundle permissions with `chmod -R a+rX`, signs the executable and the outer app bundle, always verifies with `codesign --verify --deep --strict`, checks access and a stable GUI window as the required non-owner `--verify-user`, checks the installed executable for leftover absolute local deps, and prints source/installed SHA-256 hashes for traceability. The hashes can differ because the installed executable is rewritten and signed.
+- normalizes all bundle permissions with `chmod -R a+rX`, signs the executable and the outer app bundle, always verifies with `codesign --verify --deep --strict`, checks access and a stable GUI window in the current user's session, checks the installed executable for leftover absolute local deps, and prints source/installed SHA-256 hashes for traceability. The hashes can differ because the installed executable is rewritten and signed.
 
 Useful options:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh --skip-build --verify-user wcard
-Telegram/build/mac_fast_install_forkgram.sh --copy-resources --verify-user wcard
-Telegram/build/mac_fast_install_forkgram.sh --deep-sign --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh --skip-build
+Telegram/build/mac_fast_install_forkgram.sh --copy-resources
+Telegram/build/mac_fast_install_forkgram.sh --deep-sign
 ```
 
-Use `--copy-resources` when the Release build updated app resources that are not embedded in the executable. Use `--deep-sign` to refresh nested signatures; deep verification is mandatory in every mode. Replace `wcard` with the appropriate logged-in non-owner user on another machine. If the installed app is missing, does not contain bundled frameworks/plugins, or the helper reports missing bundled dependencies, run the full packaging/install flow below.
+Use `--copy-resources` when the Release build updated app resources that are not embedded in the executable. Use `--deep-sign` to refresh nested signatures; deep verification is mandatory in every mode. Use `--verify-user USER` when verification in another logged-in user's session is requested. If the installed app is missing, does not contain bundled frameworks/plugins, or the helper reports missing bundled dependencies, run the full packaging/install flow below.
 
 ## Release packaging and DMG
 
@@ -462,10 +462,10 @@ Expected result:
 
 Do this only if user asks you to, after the packaged `out/Release/Forkgram.app` passes the verification steps above.
 
-Once packaging is complete, close Forkgram in all user sessions. Install from the repository root; the helper retains the old bundle and requires non-owner verification:
+Once packaging is complete, close Forkgram in all user sessions. Install from the repository root; the helper retains the old bundle and verifies the current user's session:
 
 ```bash
-bash Telegram/build/mac_install_forkgram.sh --verify-user wcard
+bash Telegram/build/mac_install_forkgram.sh
 ```
 
 Expected result:
@@ -473,8 +473,8 @@ Expected result:
 - `/Applications/Forkgram.app` exists
 - the entire installed bundle is readable/traversable by other local users
 - the installed bundle passes `codesign --verify --deep --strict`
-- the freshly packaged executable opens a stable GUI window as `wcard`
-- access, signature, unavailable cross-user execution, or GUI failures leave deployment unsuccessful; finish verification from the other user's Terminal as described in [the installation guide](../../../Telegram/build/mac_forkgram_install.md)
+- the freshly packaged executable opens a stable GUI window in the current user's session
+- access, signature, unavailable cross-user execution, or GUI failures leave deployment unsuccessful; finish verification from the selected user's Terminal as described in [the installation guide](../../../Telegram/build/mac_forkgram_install.md)
 
 If that scan still prints only `out/Release/Forkgram.app/Contents/MacOS/Forkgram`, rewrite each leftover `/opt/homebrew/...` dependency to the matching `@executable_path/../Frameworks/...` path, then re-sign again. This happened locally after a fresh `Release` relink.
 

@@ -108,14 +108,14 @@ Dependencies are located relative to the repository: `../Libraries`, `../win64/L
 use the Release fast-install path:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh
 ```
 
 If the Release build finished but install was blocked because Forkgram was
 running, quit Forkgram at that point and rerun:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh --skip-build --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh --skip-build
 ```
 
 **Generic Windows/debug command, not for this local macOS machine:**
@@ -173,9 +173,10 @@ Do not apply the generic Debug workflow to the local macOS Forkgram checkout.
 - Follow [shared macOS installation](Telegram/build/mac_forkgram_install.md).
   Packaging and installation use `umask 022` and normalize the validated app
   with `chmod -R a+rX` after all copies/binary edits and before final signing.
-  Both installers require `--verify-user` naming a logged-in non-owner user
-  (`wcard` here), full bundle access, deep strict signature verification, and a
-  stable GUI window in that user's session. Any failed check fails deployment.
+  Both installers verify full bundle access, the deep strict signature, and a
+  stable GUI window in the current user's session. Use `--verify-user USER`
+  only when verification in another logged-in user's session is requested.
+  Any failed check fails deployment.
   Never change permissions on user profiles, Application Support, or `tdata`.
 
 ### Linux

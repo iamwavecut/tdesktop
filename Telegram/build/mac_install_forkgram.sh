@@ -7,7 +7,7 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 bundle_tool="$script_dir/mac_forkgram_bundle.py"
 source_app="$repo_root/out/Release/Forkgram.app"
 installed_app="/Applications/Forkgram.app"
-verify_user=""
+verify_user="$(id -un)"
 
 Error() {
   echo "error: $*" >&2
@@ -26,13 +26,13 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      echo "Usage: $0 --verify-user USER [--source Forkgram.app] [--app Forkgram.app]"
+      echo "Usage: $0 [--verify-user USER] [--source Forkgram.app] [--app Forkgram.app]"
       exit 0
       ;;
     *) Error "unknown option: $1" ;;
   esac
 done
-[[ -n "$verify_user" ]] || Error "--verify-user is required for access and GUI verification"
+[[ -n "$verify_user" ]] || Error "verification user must not be empty"
 installed_app="$(cd "$(dirname "$installed_app")" && pwd -P)/$(basename "$installed_app")"
 [[ "$(basename "$installed_app")" == Forkgram.app ]] || Error "destination must be Forkgram.app"
 

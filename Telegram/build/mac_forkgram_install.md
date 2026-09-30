@@ -32,19 +32,19 @@ also be finalized before creating the image. CI uses this same helper.
 
 ## Installation and reinstallation
 
-Choose a local user other than the owner of the bundle, and have that user log
-in to a graphical macOS session. On this machine the verification user is
-`wcard`, while the installed bundle is owned by `wavecut`.
+The installers verify the current user's graphical macOS session by default.
+Use `--verify-user USER` when verification in another logged-in user's session
+is requested.
 
 For a full install of an already packaged Release bundle:
 
 ```bash
-bash Telegram/build/mac_install_forkgram.sh --verify-user wcard
+bash Telegram/build/mac_install_forkgram.sh
 ```
 
 This retains an existing bundle in a printed `/Applications/Forkgram-backup.*`
 directory, copies the complete packaged app, normalizes permissions, signs and
-verifies it, then checks it in the other user's session. Keep the backup until
+verifies it, then checks it in the selected user's session. Keep the backup until
 verification succeeds. If installation fails, leave the backup intact; do not
 report deployment complete. The scripts never terminate running applications;
 quit Forkgram in all user sessions immediately before installation, after the
@@ -53,7 +53,7 @@ Release build has finished.
 For code-only updates with the existing dependencies:
 
 ```bash
-Telegram/build/mac_fast_install_forkgram.sh --verify-user wcard
+Telegram/build/mac_fast_install_forkgram.sh
 ```
 
 Use `--skip-build` after a successful Release build, `--copy-resources` when
@@ -63,7 +63,7 @@ Dependency changes require full packaging and installation.
 
 ## Required post-install checks
 
-Both installers fail unless the selected non-owner user can read all bundle
+Both installers fail unless the selected user can read all bundle
 files, traverse its directories, execute its executables, and verify the full
 signature. The checker also opens the exact app in that user's GUI session and
 requires its process and a normal window to remain present for ten seconds.
@@ -77,7 +77,7 @@ Finish the same verification from the selected user's own Terminal:
 ```bash
 cd /Users/Shared/src/github.com/iamwavecut/tdesktop
 /usr/bin/python3 Telegram/build/mac_forkgram_bundle.py verify-install \
-  /Applications/Forkgram.app --user wcard
+  /Applications/Forkgram.app
 ```
 
 This command is read-only apart from launching the app. Its failure is a failed
@@ -91,4 +91,4 @@ For a packaging-only check without launching:
 python3 Telegram/build/mac_forkgram_bundle.py verify /Applications/Forkgram.app
 ```
 
-That command does not replace the required non-owner GUI verification.
+That command does not replace the required GUI verification.

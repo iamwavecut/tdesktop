@@ -141,6 +141,6 @@ and the deep strict signature passed. Source and installed executable SHA-256:
 
 Forkgram was restarted in both logged-in sessions. Verification checked the
 exact installed executable, user identity and a normal GUI window with the
-same PID stable for at least 10 seconds: `wavecut` PID 61873 and non-owner
-`wcard` PID 61945. Cross-user verification required entering the GUI audit
+same PID stable for at least 10 seconds: `wavecut` PID 61873 and a second
+non-owner session PID 61945. Cross-user verification required entering the GUI audit
 session as administrator before dropping to the destination user.

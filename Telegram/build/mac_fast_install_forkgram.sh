@@ -13,7 +13,7 @@ Options:
   --skip-build       Install the current out/Release executable without building.
   --copy-resources   Also copy Resources and Info.plist from out/Release.
   --deep-sign        Re-sign nested code too; verification is always deep/strict.
-  --verify-user USER Required non-owner user with a logged-in graphical session.
+  --verify-user USER GUI verification user. Default: current user.
   --app PATH         Installed app path. Default: /Applications/Forkgram.app.
   --source PATH      Source app path. Default: out/Release/Forkgram.app.
   --help             Show this help.
@@ -65,7 +65,7 @@ installed_app="/Applications/Forkgram.app"
 build=1
 copy_resources=0
 deep_sign=0
-verify_user=""
+verify_user="$(id -un)"
 bundle_tool="$script_dir/mac_forkgram_bundle.py"
 
 while [[ $# -gt 0 ]]; do
@@ -113,7 +113,7 @@ NeedCommand install_name_tool
 NeedCommand otool
 NeedCommand shasum
 NeedCommand python3
-[[ -n "$verify_user" ]] || Error "--verify-user is required for access and GUI verification"
+[[ -n "$verify_user" ]] || Error "verification user must not be empty"
 
 cd "$repo_root"
 

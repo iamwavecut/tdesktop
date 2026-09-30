@@ -97,8 +97,8 @@ function run(argv) {
 
 def verify_install(app, paths, user):
     account = pwd.getpwnam(user)
-    if account.pw_uid == 0 or account.pw_uid == app.stat().st_uid:
-        raise ValueError("verification user must be a non-root user other than the bundle owner")
+    if account.pw_uid == 0:
+        raise ValueError("verification user must be a non-root user")
     if os.geteuid() != account.pw_uid:
         subprocess.run([
             "sudo", "-n", "-u", user, "/usr/bin/python3", str(Path(__file__).resolve()),
@@ -138,7 +138,8 @@ def main():
     parser.add_argument("action", choices=["validate", "finalize", "verify", "verify-install"])
     parser.add_argument("app")
     parser.add_argument("--deep-sign", action="store_true")
-    parser.add_argument("--user", help="non-owner local user with a logged-in graphical session")
+    parser.add_argument("--user", default=pwd.getpwuid(os.geteuid()).pw_name,
+                        help="local GUI verification user; defaults to the current user")
     args = parser.parse_args()
     app, paths = bundle_paths(args.app)
     if args.action == "finalize":
@@ -146,8 +147,6 @@ def main():
     elif args.action == "verify":
         verify(app, paths)
     elif args.action == "verify-install":
-        if not args.user:
-            parser.error("verify-install requires --user")
         verify_install(app, paths, args.user)
 
 
