@@ -225,6 +225,20 @@ public:
 	void writeBotStorage(PeerId botId, const QByteArray &serialized);
 	[[nodiscard]] QByteArray readBotStorage(PeerId botId);
 
+	// Per-key encrypted records owned by the wallet engine bridge
+	// (protected secrets and the send journal). Broken reports a record
+	// that exists but cannot be read; it is kept on disk, never silently
+	// dropped, so corruption can't masquerade as absence. The write
+	// reports whether the record durably reached disk.
+	[[nodiscard]] WalletEngineValue readWalletEngineValue(
+		const QString &key);
+	[[nodiscard]] bool writeWalletEngineValue(
+		const QString &key,
+		const QByteArray &bytes);
+	bool removeWalletEngineValue(const QString &key);
+	[[nodiscard]] std::vector<QString> walletEngineStorageKeys(
+		const QString &prefix) const;
+
 	void writeMessageRevisions(const QByteArray &serialized);
 	[[nodiscard]] QByteArray readMessageRevisions();
 	void writeLocallyHiddenMessages(const QByteArray &serialized);

@@ -3786,6 +3786,115 @@ QByteArray Account::readBotStorage(PeerId botId) {
 	return result;
 }
 
+WalletEngineValue Account::readWalletEngineValue(const QString &key) {
+	const auto i = _walletEngineStoragesMap.find(key);
+	if (i == _walletEngineStoragesMap.cend()) {
+		return { .state = WalletEngineValue::State::Absent };
+	}
+	// A record that exists but cannot be read (or was written by a newer
+	// format) is reported as Broken and kept on disk untouched: the wallet
+	// engine send journal must never see file corruption as "nothing
+	// pending", which would silently abandon an interrupted transfer.
+	FileReadDescriptor file;
+	if (!ReadEncryptedFile(file, i->second, _basePath, _localKey)) {
+		return { .state = WalletEngineValue::State::Broken };
+	}
+	quint32 formatVersion = 0;
+	file.stream >> formatVersion;
+	if (!CheckStreamStatus(file.stream)
+		|| formatVersion > kWalletEngineFormatVersion) {
+		return { .state = WalletEngineValue::State::Broken };
+	}
+	auto bytes = QByteArray();
+	file.stream >> bytes;
+	if (!CheckStreamStatus(file.stream)) {
+		return { .state = WalletEngineValue::State::Broken };
+	}
+	return { .state = WalletEngineValue::State::Read, .bytes = bytes };
+}
+
+bool Account::writeWalletEngineValue(
+		const QString &key,
+		const QByteArray &bytes) {
+	auto i = _walletEngineStoragesMap.find(key);
+	const auto created = (i == _walletEngineStoragesMap.cend());
+	if (created) {
+		i = _walletEngineStoragesMap.emplace(
+			key,
+			GenerateKey(_basePath)).first;
+	}
+	const auto size = quint32(sizeof(quint32))
+		+ quint32(Serialize::bytearraySize(bytes));
+	EncryptedDescriptor data(size);
+	data.stream << quint32(kWalletEngineFormatVersion) << bytes;
+	// The sync record write reports failure: finish() returns false when
+	// both the QSaveFile commit and the plain fallback fail to persist
+	// the bytes, the platform host surfaces that as kUnavailable, and so
+	// the journal compare-exchange never claims a record durable that
+	// never reached disk. A failed first write of a key also rolls the
+	// freshly created map key back, so the record stays truthfully
+	// absent and retryable. On success a brand new file key reaches the
+	// on-disk map only after the record file is committed (the scope
+	// below closes, and its sync flag blocks on QSaveFile's atomic
+	// rename), and the map is flushed before returning; a crash between
+	// the two leaves an orphaned record file and a truthful "absent",
+	// never a map key pointing at a missing record. The map write itself
+	// stays fire-and-forget behind Sync(): a failed map write is still
+	// only logged, the record file then stands orphaned and reads Absent
+	// after restart, and the engine's resolve_pending() reconciliation
+	// is the backstop, as it also is for the power-loss window (an
+	// abrupt power loss can still roll back a committed rename, no
+	// directory fsync). The Sync() call drains every queued storage
+	// write, not only the map -- accepted, this runs a few times per
+	// wallet lifetime.
+	auto written = false;
+	{
+		FileWriteDescriptor file(i->second, _basePath, true);
+		file.writeEncrypted(data, _localKey);
+		written = file.finish();
+	}
+	if (!written) {
+		if (created) {
+			_walletEngineStoragesMap.erase(i);
+		}
+		return false;
+	}
+	if (created) {
+		_mapChanged = true;
+		writeMap();
+		Sync();
+	}
+	return true;
+}
+
+bool Account::removeWalletEngineValue(const QString &key) {
+	const auto i = _walletEngineStoragesMap.find(key);
+	if (i == _walletEngineStoragesMap.cend()) {
+		return false;
+	}
+	const auto fileKey = i->second;
+	_walletEngineStoragesMap.erase(i);
+	// Drop the key from the on-disk map before deleting the file, so that
+	// a crash between the two leaves an orphaned file, not a key pointing
+	// at nothing that the next read would report as a broken record.
+	_mapChanged = true;
+	writeMap();
+	Sync();
+	ClearKey(fileKey, _basePath);
+	return true;
+}
+
+std::vector<QString> Account::walletEngineStorageKeys(
+		const QString &prefix) const {
+	auto result = std::vector<QString>();
+	for (const auto &[key, fileKey] : _walletEngineStoragesMap) {
+		if (key.startsWith(prefix)) {
+			result.push_back(key);
+		}
+	}
+	return result;
+}
+
 void Account::writeMessageRevisions(const QByteArray &serialized) {
 	if (serialized.isEmpty()) {
 		clearPref(kMessageRevisionsPref);
