@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_location.h"
 #include "core/version.h"
 #include "data/components/recent_inline_bots.h"
+#include "data/components/recent_money_recipients.h"
 #include "data/components/recent_peers.h"
 #include "settings/settings_recent_searches.h"
 #include "data/components/top_peers.h"
@@ -74,6 +75,7 @@ constexpr auto kMultiDraftTag = quint64(0xFFFF'FFFF'FFFF'FF03ULL);
 constexpr auto kMultiDraftCursorsTag = quint64(0xFFFF'FFFF'FFFF'FF04ULL);
 constexpr auto kRichDraftsTag = quint64(0xFFFF'FFFF'FFFF'FF05ULL);
 constexpr auto kDraftsTag2 = quint64(0xFFFF'FFFF'FFFF'FF06ULL);
+constexpr auto kWalletEngineFormatVersion = quint32(1);
 
 enum { // Local Storage Keys
 	lskUserMap = 0x00,
@@ -107,6 +109,9 @@ enum { // Local Storage Keys
 	lskMediaLastPlaybackPositions = 0x1c, // no data
 	lskBotStorages = 0x1d, // data: PeerId botId
 	lskPrefs = 0x1e, // no data
+	lskWalletKey = 0x1f, // no data, legacy wallet record
+	lskWalletEngineKey = 0x20, // no data, legacy single-file storage
+	lskWalletEngineStorages = 0x21, // data: QString key
 };
 
 auto EmptyMessageDraftSources()
@@ -325,6 +330,9 @@ base::flat_set<QString> Account::collectGoodNames() const {
 	for (const auto &[key, value] : _botStoragesMap) {
 		push(value);
 	}
+	for (const auto &[key, value] : _walletEngineStoragesMap) {
+		push(value);
+	}
 	for (const auto &value : keys) {
 		push(value);
 	}
@@ -392,6 +400,9 @@ Account::ReadMapResult Account::readMapWith(
 	quint64 roundPlaceholderKey = 0;
 	quint64 inlineBotsDownloadsKey = 0;
 	quint64 mediaLastPlaybackPositionsKey = 0;
+	quint64 walletLegacyKey = 0;
+	quint64 walletEngineLegacyKey = 0;
+	base::flat_map<QString, FileKey> walletEngineStoragesMap;
 	QByteArray webviewStorageTokenBots, webviewStorageTokenOther;
 	while (!map.stream.atEnd()) {
 		quint32 keyType;
@@ -513,6 +524,25 @@ Account::ReadMapResult Account::readMapWith(
 		case lskMediaLastPlaybackPositions: {
 			map.stream >> mediaLastPlaybackPositionsKey;
 		} break;
+		case lskWalletKey: {
+			map.stream >> walletLegacyKey;
+		} break;
+		case lskWalletEngineKey: {
+			map.stream >> walletEngineLegacyKey;
+		} break;
+		case lskWalletEngineStorages: {
+			quint32 count = 0;
+			map.stream >> count;
+			for (auto i = quint32(0); i != count; ++i) {
+				FileKey key = 0;
+				QString entryKey;
+				map.stream >> key >> entryKey;
+				if (!CheckStreamStatus(map.stream)) {
+					return ReadMapResult::Failed;
+				}
+				walletEngineStoragesMap.emplace(entryKey, key);
+			}
+		} break;
 		case lskWebviewTokens: {
 			map.stream
 				>> webviewStorageTokenBots
@@ -572,6 +602,7 @@ Account::ReadMapResult Account::readMapWith(
 	_roundPlaceholderKey = roundPlaceholderKey;
 	_inlineBotsDownloadsKey = inlineBotsDownloadsKey;
 	_mediaLastPlaybackPositionsKey = mediaLastPlaybackPositionsKey;
+	_walletEngineStoragesMap = walletEngineStoragesMap;
 	_oldMapVersion = mapData.version;
 	_webviewStorageIdBots.token = webviewStorageTokenBots;
 	_webviewStorageIdOther.token = webviewStorageTokenOther;
@@ -580,6 +611,14 @@ Account::ReadMapResult Account::readMapWith(
 		writeMapDelayed();
 	} else {
 		_mapChanged = false;
+	}
+	if (walletLegacyKey) {
+		ClearKey(walletLegacyKey, _basePath);
+		writeMapDelayed();
+	}
+	if (walletEngineLegacyKey) {
+		ClearKey(walletEngineLegacyKey, _basePath);
+		writeMapDelayed();
 	}
 
 	if (_prefsKey) {
@@ -694,6 +733,12 @@ void Account::writeMap() {
 	if (_inlineBotsDownloadsKey) mapSize += sizeof(quint32) + sizeof(quint64);
 	if (_mediaLastPlaybackPositionsKey) mapSize += sizeof(quint32) + sizeof(quint64);
 	if (!_botStoragesMap.empty()) mapSize += sizeof(quint32) * 2 + _botStoragesMap.size() * sizeof(quint64) * 2;
+	if (!_walletEngineStoragesMap.empty()) {
+		mapSize += sizeof(quint32) * 2;
+		for (const auto &[key, value] : _walletEngineStoragesMap) {
+			mapSize += sizeof(quint64) + Serialize::stringSize(key);
+		}
+	}
 
 	EncryptedDescriptor mapData(mapSize);
 	if (!self.isEmpty()) {
@@ -779,6 +824,14 @@ void Account::writeMap() {
 		mapData.stream << quint32(lskMediaLastPlaybackPositions);
 		mapData.stream << quint64(_mediaLastPlaybackPositionsKey);
 	}
+	if (!_walletEngineStoragesMap.empty()) {
+		mapData.stream
+			<< quint32(lskWalletEngineStorages)
+			<< quint32(_walletEngineStoragesMap.size());
+		for (const auto &[key, value] : _walletEngineStoragesMap) {
+			mapData.stream << quint64(value) << key;
+		}
+	}
 	if (!_botStoragesMap.empty()) {
 		mapData.stream << quint32(lskBotStorages) << quint32(_botStoragesMap.size());
 		for (const auto &[key, value] : _botStoragesMap) {
@@ -820,6 +873,7 @@ void Account::reset() {
 	_roundPlaceholderKey = 0;
 	_inlineBotsDownloadsKey = 0;
 	_mediaLastPlaybackPositionsKey = 0;
+	_walletEngineStoragesMap.clear();
 	_oldMapVersion = 0;
 	_fileLocations.clear();
 	_fileLocationPairs.clear();
@@ -3240,10 +3294,13 @@ void Account::writeSearchSuggestions() {
 		= _owner->session().recentSettingsSearches().serialize();
 	const auto guestChatBots
 		= _owner->session().topGuestChatBots().serialize();
+	const auto moneyRecipients
+		= _owner->session().recentMoneyRecipients().serialize();
 	if (top.isEmpty()
 		&& recent.isEmpty()
 		&& settingsSearches.isEmpty()
-		&& guestChatBots.isEmpty()) {
+		&& guestChatBots.isEmpty()
+		&& moneyRecipients.isEmpty()) {
 		if (_searchSuggestionsKey) {
 			ClearKey(_searchSuggestionsKey, _basePath);
 			_searchSuggestionsKey = 0;
@@ -3258,9 +3315,15 @@ void Account::writeSearchSuggestions() {
 	quint32 size = Serialize::bytearraySize(top)
 		+ Serialize::bytearraySize(recent)
 		+ Serialize::bytearraySize(settingsSearches)
-		+ Serialize::bytearraySize(guestChatBots);
+		+ Serialize::bytearraySize(guestChatBots)
+		+ Serialize::bytearraySize(moneyRecipients);
 	EncryptedDescriptor data(size);
-	data.stream << top << recent << settingsSearches << guestChatBots;
+	data.stream
+		<< top
+		<< recent
+		<< settingsSearches
+		<< guestChatBots
+		<< moneyRecipients;
 
 	FileWriteDescriptor file(_searchSuggestionsKey, _basePath);
 	file.writeEncrypted(data, _localKey);
@@ -3289,6 +3352,7 @@ void Account::readSearchSuggestions() {
 	auto recent = QByteArray();
 	auto settingsSearches = QByteArray();
 	auto guestChatBots = QByteArray();
+	auto moneyRecipients = QByteArray();
 	suggestions.stream >> top >> recent;
 	if (!suggestions.stream.atEnd()) {
 		suggestions.stream >> settingsSearches;
@@ -3296,12 +3360,16 @@ void Account::readSearchSuggestions() {
 	if (!suggestions.stream.atEnd()) {
 		suggestions.stream >> guestChatBots;
 	}
+	if (!suggestions.stream.atEnd()) {
+		suggestions.stream >> moneyRecipients;
+	}
 	if (CheckStreamStatus(suggestions.stream)) {
 		_owner->session().topPeers().applyLocal(top);
 		_owner->session().recentPeers().applyLocal(recent);
 		_owner->session().recentSettingsSearches().applyLocal(
 			settingsSearches);
 		_owner->session().topGuestChatBots().applyLocal(guestChatBots);
+		_owner->session().recentMoneyRecipients().applyLocal(moneyRecipients);
 	} else {
 		DEBUG_LOG(("Suggestions: Could not read content."));
 	}
@@ -3893,6 +3961,22 @@ std::optional<bool> Account::readPrefImpl<bool>(std::string_view key) {
 template <>
 void Account::writePrefImpl<bool>(std::string_view key, bool value) {
 	writePrefGeneric(key, value ? "\x1"_q : QByteArray());
+}
+
+template <>
+std::optional<QString> Account::readPrefImpl<QString>(
+		std::string_view key) {
+	if (const auto data = readPrefGeneric(key)) {
+		return QString::fromUtf8(*data);
+	}
+	return {};
+}
+
+template <>
+void Account::writePrefImpl<QString>(
+		std::string_view key,
+		QString value) {
+	writePrefGeneric(key, value.toUtf8());
 }
 
 } // namespace Storage

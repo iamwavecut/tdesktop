@@ -67,6 +67,17 @@ struct MessageDraftSource {
 	Fn<MessageCursor()> cursor;
 };
 
+struct WalletEngineValue {
+	enum class State : uchar {
+		Read,
+		Absent,
+		Broken,
+	};
+
+	State state = State::Absent;
+	QByteArray bytes;
+};
+
 class Account final {
 public:
 	Account(not_null<Main::Account*> owner, const QString &dataName);
@@ -370,6 +381,7 @@ private:
 	FileKey _roundPlaceholderKey = 0;
 	FileKey _inlineBotsDownloadsKey = 0;
 	FileKey _mediaLastPlaybackPositionsKey = 0;
+	base::flat_map<QString, FileKey> _walletEngineStoragesMap;
 
 	qint64 _cacheTotalSizeLimit = 0;
 	qint64 _cacheBigFileTotalSizeLimit = 0;
