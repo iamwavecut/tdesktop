@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/mime_type.h"
 #include "core/version.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -2231,6 +2232,12 @@ void Service::registerTools() {
 				{ u"peer_id"_q, QJsonObject{ { u"type"_q, u"string"_q } } },
 				{ u"path"_q, QJsonObject{ { u"type"_q, u"string"_q } } },
 				{ u"caption"_q, QJsonObject{ { u"type"_q, u"string"_q } } },
+				{ u"force_file"_q, QJsonObject{
+					{ u"type"_q, u"boolean"_q },
+					{ u"description"_q, u"Send a video as an unmodified "
+						"document, like unticking Compress in the send "
+						"box. Default false."_q },
+				} },
 			} },
 			{ u"required"_q, QJsonArray{ u"peer_id"_q, u"path"_q } },
 			{ u"additionalProperties"_q, false },
@@ -2262,6 +2269,14 @@ void Service::registerTools() {
 				arguments.value(u"caption"_q).toString(),
 				{},
 			};
+			// sendFiles() skips transcoding only for files typed as video.
+			const auto forceFile = arguments.value(u"force_file"_q).toBool()
+				&& FileLoadTask::IsVideoFile(
+					path,
+					Core::MimeTypeForFile(info).name());
+			if (forceFile) {
+				list.files.front().type = Ui::PreparedFile::Type::Video;
+			}
 			session->api().sendFiles(
 				std::move(list),
 				SendMediaType::File,
@@ -2272,6 +2287,7 @@ void Service::registerTools() {
 				{ u"peer_id"_q, QString::number(peer->id.value) },
 				{ u"path"_q, info.absoluteFilePath() },
 				{ u"size"_q, QString::number(info.size()) },
+				{ u"force_file"_q, forceFile },
 				{ u"queued"_q, true },
 			} });
 		},
