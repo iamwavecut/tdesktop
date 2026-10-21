@@ -298,6 +298,8 @@ public:
 
 	// Internal links.
 	void checkStartUrls();
+	[[nodiscard]] QPointer<QWidget> checkStartUrlsActivating();
+	void registerWindowActivation(not_null<QWidget*> window);
 	bool openLocalUrl(const QString &url, QVariant context);
 	bool openInternalUrl(const QString &url, QVariant context);
 	[[nodiscard]] QString changelogLink() const;
@@ -490,6 +492,7 @@ private:
 	base::Timer _autoLockTimer;
 
 	QList<QUrl> _urlsToOpen;
+	std::optional<QPointer<QWidget>> _startUrlActivated;
 
 	std::optional<base::Timer> _saveSettingsTimer;
 

@@ -115,7 +115,6 @@ public:
 	void readDraftsWithCursors(not_null<History*> history);
 	void writeDraftCursors(not_null<History*> history);
 	[[nodiscard]] bool hasDraftCursors(PeerId peerId);
-	[[nodiscard]] bool hasDraft(PeerId peerId);
 
 	void writeFileLocation(
 		MediaKey location,

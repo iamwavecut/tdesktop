@@ -20,7 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QOpenGLShader>
 #include <QOpenGLBuffer>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 #include <rhi/qrhi.h>
 #endif
 
@@ -538,7 +538,7 @@ void Panel::Incoming::RendererSW::fillBottomShadow(QPainter &p) {
 			factor * fill.height()));
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 
 // std140 puts the vec3 at offset 16, the NDC Y flip fills the hole.
 struct IncomingShadowUniforms {
@@ -1140,7 +1140,7 @@ private:
 	QRect _shadowRightRect;
 	bool _initialized = false;
 };
-#endif // Qt >= 6.7
+#endif // Qt >= 6.7 && !DESKTOP_APP_DISABLE_PRIVATE_QT_API
 
 Panel::Incoming::Incoming(
 	not_null<QWidget*> parent,
