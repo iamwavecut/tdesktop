@@ -31,6 +31,7 @@ public:
 		not_null<QWidget*> window,
 		rpl::producer<bool> active,
 		rpl::lifetime &lifetime);
+	[[nodiscard]] bool activeFor(not_null<QWidget*> window) const;
 
 private:
 	void addReason(
@@ -39,7 +40,6 @@ private:
 		rpl::lifetime &lifetime);
 	void refresh();
 	void apply(not_null<QWidget*> window, bool force = false);
-	[[nodiscard]] bool activeFor(not_null<QWidget*> window) const;
 
 	struct Reason {
 		QPointer<QWidget> window;

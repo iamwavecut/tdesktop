@@ -315,12 +315,12 @@ void UiDriver::registerTools() {
 				u"window_handle"_q).toString());
 			if (_application->passcodeLocked()) {
 				done(error(u"APP_LOCKED"_q, u"Forkgram is locked."_q));
-			} else if (_application->screenshotProtection().active()) {
+			} else if (!window) {
+				done(error(u"STALE_WINDOW"_q, u"Window handle is stale."_q));
+			} else if (_application->screenshotProtection().activeFor(window)) {
 				done(error(
 					u"SCREENSHOT_PROTECTED"_q,
 					u"The visible content is protected from screenshots."_q));
-			} else if (!window) {
-				done(error(u"STALE_WINDOW"_q, u"Window handle is stale."_q));
 			} else {
 				auto png = QByteArray();
 				auto buffer = QBuffer(&png);
