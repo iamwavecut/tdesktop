@@ -163,6 +163,11 @@ void Pip::RendererRhi::initialize(
 		return;
 	}
 	releaseResources();
+	const auto guard = gsl::finally([&] {
+		if (!_initialized) {
+			releaseResources();
+		}
+	});
 
 	_rhi = rhi;
 	_rt = rt;
@@ -172,13 +177,17 @@ void Pip::RendererRhi::initialize(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::VertexBuffer,
 		kMaxDraws * kVertexSlotSize);
-	_vertexBuffer->create();
+	if (!_vertexBuffer->create()) {
+		return;
+	}
 
 	_uniformBuffer = rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		kMaxDraws * 256);
-	_uniformBuffer->create();
+	if (!_uniformBuffer->create()) {
+		return;
+	}
 
 	_sampler = rhi->newSampler(
 		QRhiSampler::Linear,
@@ -186,10 +195,14 @@ void Pip::RendererRhi::initialize(
 		QRhiSampler::None,
 		QRhiSampler::ClampToEdge,
 		QRhiSampler::ClampToEdge);
-	_sampler->create();
+	if (!_sampler->create()) {
+		return;
+	}
 
 	_placeholderTexture = rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1));
-	_placeholderTexture->create();
+	if (!_placeholderTexture->create()) {
+		return;
+	}
 
 	_initialized = createPipelines();
 	if (!_initialized) {
@@ -410,6 +423,9 @@ void Pip::RendererRhi::render(
 	_rub = rhi->nextResourceUpdateBatch();
 
 	_owner->paint(this);
+	if (!_initialized) {
+		return;
+	}
 
 	const auto bg = QColor(0, 0, 0, 0);
 	cb->beginPass(rt, bg, { 1.0f, 0 }, _rub);
@@ -433,6 +449,9 @@ void Pip::RendererRhi::render(
 }
 
 void Pip::RendererRhi::releaseResources() {
+	if (const auto rub = base::take(_rub)) {
+		rub->release();
+	}
 	_drawCommands.clear();
 	for (auto *srb : _srbPool) {
 		delete srb;
@@ -539,6 +558,9 @@ void Pip::RendererRhi::createShadowTexture() {
 
 void Pip::RendererRhi::paintTransformedVideoFrame(
 		ContentGeometry geometry) {
+	if (!_initialized) {
+		return;
+	}
 	const auto data = _owner->videoFrameWithInfo();
 	if (data.format == Streaming::FrameFormat::None) {
 		return;
@@ -557,8 +579,9 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 		|| (data.format == Streaming::FrameFormat::NV12);
 	const auto yuv = data.yuv;
 	const auto nv12changed = !nativeTexture && (_chromaNV12 != nv12);
-	const auto upload = (_trackFrameIndex != data.index);
-	_trackFrameIndex = data.index;
+	const auto upload = (_trackFrameIndex != data.index)
+		|| !_yTexture
+		|| (nv12 ? !_uvTexture : (!_uTexture || !_vTexture));
 
 	if (upload) {
 		auto zeroCopied = false;
@@ -602,7 +625,10 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 			if (!_yTexture || _lumaSize != yuv->size) {
 				delete _yTexture;
 				_yTexture = _rhi->newTexture(QRhiTexture::R8, yuv->size);
-				_yTexture->create();
+				if (!_yTexture->create()) {
+					_initialized = false;
+					return;
+				}
 				_lumaSize = yuv->size;
 			}
 			auto yDesc = QRhiTextureSubresourceUploadDescription(
@@ -618,7 +644,10 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 					delete _uvTexture;
 					_uvTexture = _rhi->newTexture(
 						QRhiTexture::RG8, yuv->chromaSize);
-					_uvTexture->create();
+					if (!_uvTexture->create()) {
+						_initialized = false;
+						return;
+					}
 					_chromaSize = yuv->chromaSize;
 				}
 				auto uvDesc = QRhiTextureSubresourceUploadDescription(
@@ -633,11 +662,17 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 					delete _uTexture;
 					_uTexture = _rhi->newTexture(
 						QRhiTexture::R8, yuv->chromaSize);
-					_uTexture->create();
+					if (!_uTexture->create()) {
+						_initialized = false;
+						return;
+					}
 					delete _vTexture;
 					_vTexture = _rhi->newTexture(
 						QRhiTexture::R8, yuv->chromaSize);
-					_vTexture->create();
+					if (!_vTexture->create()) {
+						_initialized = false;
+						return;
+					}
 					_chromaSize = yuv->chromaSize;
 				}
 				auto uDesc = QRhiTextureSubresourceUploadDescription(
@@ -656,9 +691,13 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 		} // !zeroCopied
 		_chromaNV12 = nv12;
 		_usingExternalVideoTextures = zeroCopied;
+		_trackFrameIndex = data.index;
 	}
 
 	_shadowImage.upload(_rhi, _rub);
+	if (!_shadowImage.texture()) {
+		return;
+	}
 
 	if (nv12) {
 		const auto slot = allocateDrawSlot();
@@ -682,9 +721,7 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 				_uvTexture, _sampler),
 			QRhiShaderResourceBinding::sampledTexture(
 				3, QRhiShaderResourceBinding::FragmentStage,
-				_shadowImage.texture()
-					? _shadowImage.texture()
-					: _placeholderTexture,
+				_shadowImage.texture(),
 				_sampler),
 		});
 		if (!srb->create()) {
@@ -716,9 +753,7 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 				_vTexture, _sampler),
 			QRhiShaderResourceBinding::sampledTexture(
 				4, QRhiShaderResourceBinding::FragmentStage,
-				_shadowImage.texture()
-					? _shadowImage.texture()
-					: _placeholderTexture,
+				_shadowImage.texture(),
 				_sampler),
 		});
 		if (!srb->create()) {
@@ -731,19 +766,24 @@ void Pip::RendererRhi::paintTransformedVideoFrame(
 void Pip::RendererRhi::paintTransformedStaticContent(
 		const QImage &image,
 		ContentGeometry geometry) {
+	if (!_initialized) {
+		return;
+	}
 	if (image.isNull() || !_argb32Pipeline) {
 		return;
 	}
 
 	const auto cacheKey = image.cacheKey();
 	if (_cacheKey != cacheKey) {
-		_cacheKey = cacheKey;
 		if (!_rgbaTexture || _rgbaSize != image.size()) {
 			delete _rgbaTexture;
 			_rgbaTexture = _rhi->newTexture(
 				QRhiTexture::BGRA8,
 				image.size());
-			_rgbaTexture->create();
+			if (!_rgbaTexture->create()) {
+				_initialized = false;
+				return;
+			}
 			_rgbaSize = image.size();
 		}
 		auto desc = QRhiTextureSubresourceUploadDescription(image);
@@ -751,8 +791,13 @@ void Pip::RendererRhi::paintTransformedStaticContent(
 			_rgbaTexture,
 			QRhiTextureUploadDescription(
 				QRhiTextureUploadEntry(0, 0, desc)));
+		_cacheKey = cacheKey;
 	}
 
+	_shadowImage.upload(_rhi, _rub);
+	if (!_shadowImage.texture()) {
+		return;
+	}
 	const auto slot = allocateDrawSlot();
 	if (slot < 0) {
 		return;
@@ -774,9 +819,7 @@ void Pip::RendererRhi::paintTransformedStaticContent(
 		QRhiShaderResourceBinding::sampledTexture(
 			2,
 			QRhiShaderResourceBinding::FragmentStage,
-			_shadowImage.texture()
-				? _shadowImage.texture()
-				: _placeholderTexture,
+			_shadowImage.texture(),
 			_sampler),
 	});
 	if (!srb->create()) {
@@ -793,6 +836,9 @@ void Pip::RendererRhi::paintTransformedContent(
 		QRhiShaderResourceBindings *srb,
 		ContentGeometry geometry,
 		int slot) {
+	if (!_initialized) {
+		return;
+	}
 	std::array<std::array<float, 2>, 4> rect = { {
 		{ { -1.f, 1.f } },
 		{ { 1.f, 1.f } },
@@ -882,6 +928,9 @@ void Pip::RendererRhi::paintTransformedContent(
 void Pip::RendererRhi::paintRadialLoading(
 		QRect inner,
 		float64 controlsShown) {
+	if (!_initialized) {
+		return;
+	}
 	paintUsingRaster(_radialImage, inner, [&](QPainter &&p) {
 		const auto newInner = QRect(QPoint(), inner.size());
 		const auto fg = st::radialFg->c;
@@ -902,6 +951,9 @@ void Pip::RendererRhi::paintRadialLoading(
 }
 
 void Pip::RendererRhi::paintPlayback(QRect outer, float64 shown) {
+	if (!_initialized) {
+		return;
+	}
 	paintUsingRaster(_playbackImage, outer, [&](QPainter &&p) {
 		const auto newOuter = QRect(QPoint(), outer.size());
 		_owner->paintPlaybackContent(p, newOuter, shown);
@@ -909,6 +961,9 @@ void Pip::RendererRhi::paintPlayback(QRect outer, float64 shown) {
 }
 
 void Pip::RendererRhi::paintVolumeController(QRect outer, float64 shown) {
+	if (!_initialized) {
+		return;
+	}
 	paintUsingRaster(
 		_volumeControllerImage,
 		outer,
@@ -920,7 +975,13 @@ void Pip::RendererRhi::paintVolumeController(QRect outer, float64 shown) {
 }
 
 void Pip::RendererRhi::paintButtonsStart() {
+	if (!_initialized) {
+		return;
+	}
 	validateControls();
+	if (!_initialized) {
+		return;
+	}
 }
 
 void Pip::RendererRhi::paintButton(
@@ -930,6 +991,9 @@ void Pip::RendererRhi::paintButton(
 		float64 over,
 		const style::icon &icon,
 		const style::icon &iconOver) {
+	if (!_initialized) {
+		return;
+	}
 	const auto tryIndex = [&](int stateIndex) -> std::optional<Control> {
 		const auto result = ControlMeta(button.state, stateIndex);
 		return (result.icon == &icon && result.iconOver == &iconOver)
@@ -1109,6 +1173,9 @@ void Pip::RendererRhi::paintUsingRaster(
 		QRect rect,
 		Fn<void(QPainter&&)> method,
 		bool transparent) {
+	if (!_initialized) {
+		return;
+	}
 	auto raster = image.takeImage();
 	const auto size = rect.size() * _ifactor;
 	if (raster.width() < size.width()
@@ -1131,6 +1198,9 @@ void Pip::RendererRhi::paintUsingRaster(
 
 	image.setImage(std::move(raster), size);
 	image.upload(_rhi, _rub);
+	if (!image.texture()) {
+		return;
+	}
 
 	const auto textured = image.texturedRect(
 		rect,
