@@ -382,7 +382,7 @@ bool Viewport::RendererRhi::createPipelines() {
 	}
 
 	{
-		auto tex = std::unique_ptr<QRhiTexture>(_rhi->newTexture(
+		auto *tex = _rhi->newTexture(
 			QRhiTexture::RGBA8,
 			QSize(1, 1),
 			1,
