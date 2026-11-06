@@ -93,6 +93,9 @@ public:
 
 	[[nodiscard]] QString tempDirectory() const;
 	[[nodiscard]] QString supportModePath() const;
+	[[nodiscard]] QString basePath() const {
+		return _basePath;
+	}
 	[[nodiscard]] QString forkLocalMessageStatePath() const;
 	[[nodiscard]] Forkgram::LocalMessageState::Store &forkLocalMessageState();
 
