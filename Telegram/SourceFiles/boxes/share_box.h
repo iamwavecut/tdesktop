@@ -95,8 +95,7 @@ void FastShareMessageToSelf(
 void FastShareMessage(
 	std::shared_ptr<Main::SessionShow> show,
 	not_null<HistoryItem*> item,
-	ShareBoxStyleOverrides st = {},
-	Window::SessionController *controller = nullptr);
+	ShareBoxStyleOverrides st = {});
 void FastShareMessage(
 	not_null<Window::SessionController*> controller,
 	not_null<HistoryItem*> item,
@@ -152,6 +151,7 @@ public:
 		SubmitCallback submitCallback;
 		FilterCallback filterCallback;
 		AsCopyCallback asCopyCallback;
+		Fn<void()> repostStoryCallback;
 		Fn<int(const TextWithTags&, bool)> copyCountMessagesCallback;
 		Fn<int(not_null<Data::Thread*>, const TextWithTags&, bool, bool, bool)>
 			preparedCountMessagesCallback;

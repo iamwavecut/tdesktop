@@ -2345,7 +2345,7 @@ void FastShareMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
 		ShareBoxStyleOverrides st) {
-	FastShareMessage(controller->uiShow(), item, st, controller.get());
+	FastShareMessage(controller->uiShow(), item, st);
 }
 
 void FastShareLink(
