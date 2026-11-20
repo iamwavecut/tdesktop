@@ -35,6 +35,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/message_field.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_send.h"
+#include "lottie/lottie_icon.h"
+#include "ui/rect.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
@@ -47,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peer_list_controllers.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "chat_helpers/share_message_phrase_factory.h"
+#include "media/stories/media_stories_post.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/data_channel.h"
 #include "data/data_chat_filters.h"
@@ -73,6 +76,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
+
+namespace {
+constexpr auto kStoryRepostLottieStartDelay = crl::time(450);
+} // namespace
 
 class ShareBox::Inner final : public Ui::RpWidget {
 public:
@@ -145,6 +152,12 @@ private:
 	[[nodiscard]] not_null<Data::Thread*> chatThread(
 		not_null<Chat*> chat) const;
 
+	[[nodiscard]] bool hasStoryRepost() const {
+		return _hasStoryRepost && _filter.isEmpty();
+	}
+	[[nodiscard]] QRect storyRepostRect() const;
+	void paintStoryRepost(Painter &p);
+
 	void paintChat(Painter &p, not_null<Chat*> chat, int index);
 	void updateChat(not_null<PeerData*> peer);
 	void updateChatName(not_null<Chat*> chat);
@@ -200,6 +213,9 @@ private:
 	base::flat_set<not_null<Data::Thread*>> _selected;
 
 	Fn<void(not_null<Data::Thread*>, bool)> _peerSelectedChangedCallback;
+	bool _hasStoryRepost = false;
+	Ui::Text::String _storyRepostName;
+	std::unique_ptr<Lottie::Icon> _storyRepostLottie;
 
 	bool _searching = false;
 	QString _lastQuery;
@@ -903,9 +919,26 @@ ShareBox::Inner::Inner(
 	std::make_unique<Dialogs::IndexedList>(
 		Dialogs::SortMode::Add))
 , _chatsIndexed(_defaultChatsIndexed.get()) {
+	_hasStoryRepost = (_descriptor.repostStoryCallback != nullptr);
 	_rowsTop = st::shareRowsTop;
 	_rowHeight = st::shareRowHeight;
 	setAttribute(Qt::WA_OpaquePaintEvent);
+	_storyRepostName.setText(
+		_st.item.nameStyle,
+		tr::lng_repost_to_story(tr::now));
+	if (_hasStoryRepost) {
+		_storyRepostLottie = Lottie::MakeIcon({
+			.name = u"story_repost"_q,
+			.sizeOverride = Size(st::shareStoryRepostIconSize),
+		});
+		base::call_delayed(kStoryRepostLottieStartDelay, this, [=] {
+			if (_storyRepostLottie) {
+				_storyRepostLottie->animate([=] {
+					update(storyRepostRect());
+				}, 0, _storyRepostLottie->framesCount() - 1);
+			}
+		});
+	}
 
 	if (_descriptor.moneyRestrictionError) {
 		const auto session = _descriptor.session;
@@ -1039,7 +1072,10 @@ void ShareBox::Inner::activateSkipRow(int direction) {
 }
 
 int ShareBox::Inner::displayedChatsCount() const {
-	return _filter.isEmpty() ? _chatsIndexed->size() : (_filtered.size() + d_byUsernameFiltered.size());
+	const auto base = _filter.isEmpty()
+		? _chatsIndexed->size()
+		: (_filtered.size() + d_byUsernameFiltered.size());
+	return base + (hasStoryRepost() ? 1 : 0);
 }
 
 void ShareBox::Inner::activateSkipColumn(int direction) {
@@ -1115,6 +1151,11 @@ void ShareBox::Inner::repaintChatAtIndex(int index) {
 ShareBox::Inner::Chat *ShareBox::Inner::getChatAtIndex(int index) {
 	if (index < 0) {
 		return nullptr;
+	} else if (hasStoryRepost()) {
+		if (index == 0) {
+			return nullptr;
+		}
+		--index;
 	}
 	const auto row = [=] {
 		if (_filter.isEmpty()) {
@@ -1145,11 +1186,12 @@ void ShareBox::Inner::repaintChat(not_null<PeerData*> peer) {
 
 int ShareBox::Inner::chatIndex(not_null<PeerData*> peer) const {
 	int index = 0;
+	const auto shift = hasStoryRepost() ? 1 : 0;
 	if (_filter.isEmpty()) {
 		for (const auto &row : _chatsIndexed->all()) {
 			if (const auto history = row->history()) {
 				if (history->peer == peer) {
-					return index;
+					return index + shift;
 				}
 			}
 			++index;
@@ -1190,7 +1232,8 @@ void ShareBox::Inner::loadProfilePhotos() {
 
 	if (_filter.isEmpty()) {
 		if (!_chatsIndexed->empty()) {
-			const auto index = yFrom / _rowHeight;
+			const auto shift = hasStoryRepost() ? 1 : 0;
+			const auto index = std::max(0, yFrom / _rowHeight - shift);
 			auto i = _chatsIndexed->begin()
 				+ std::min(index, _chatsIndexed->size());
 			for (auto end = _chatsIndexed->cend(); i != end; ++i) {
@@ -1264,6 +1307,10 @@ auto ShareBox::Inner::getChat(not_null<Dialogs::Row*> row)
 void ShareBox::Inner::setActive(int active) {
 	if (active != _active) {
 		auto changeNameFg = [this](int index, float64 from, float64 to) {
+			if (hasStoryRepost() && index == 0) {
+				repaintChatAtIndex(0);
+				return;
+			}
 			if (auto chat = getChatAtIndex(index)) {
 				chat->nameActive.start([this, peer = chat->peer] {
 					repaintChat(peer);
@@ -1345,7 +1392,24 @@ void ShareBox::Inner::paintEvent(QPaintEvent *e) {
 	auto indexFrom = rowFrom * _columnCount;
 	auto indexTo = rowTo * _columnCount;
 	if (_filter.isEmpty()) {
-		if (!_chatsIndexed->empty()) {
+		if (hasStoryRepost()) {
+			if (indexFrom == 0) {
+				paintStoryRepost(p);
+			}
+			auto chatIndexFrom = std::max(0, indexFrom - 1);
+			const auto chatIndexTo = std::max(0, indexTo - 1);
+			if (!_chatsIndexed->empty()) {
+				auto i = _chatsIndexed->begin()
+					+ std::min(chatIndexFrom, _chatsIndexed->size());
+				for (auto end = _chatsIndexed->cend(); i != end; ++i) {
+					if (chatIndexFrom >= chatIndexTo) {
+						break;
+					}
+					paintChat(p, getChat(*i), chatIndexFrom + 1);
+					++chatIndexFrom;
+				}
+			}
+		} else if (!_chatsIndexed->empty()) {
 			auto i = _chatsIndexed->begin()
 				+ std::min(indexFrom, _chatsIndexed->size());
 			for (auto end = _chatsIndexed->cend(); i != end; ++i) {
@@ -1443,12 +1507,82 @@ void ShareBox::Inner::updateUpon(const QPoint &pos) {
 void ShareBox::Inner::mousePressEvent(QMouseEvent *e) {
 	if (e->button() == Qt::LeftButton) {
 		updateUpon(e->pos());
+		if (hasStoryRepost() && _upon == 0) {
+			const auto callback = _descriptor.repostStoryCallback;
+			_show->hideLayer();
+			if (callback) {
+				callback();
+			}
+			return;
+		}
 		changeCheckState(getChatAtIndex(_upon));
 	}
 }
 
 void ShareBox::Inner::selectActive() {
-	changeCheckState(getChatAtIndex(_active > 0 ? _active : 0));
+	const auto index = (_active > 0) ? _active : 0;
+	if (hasStoryRepost() && index == 0) {
+		const auto callback = _descriptor.repostStoryCallback;
+		_show->hideLayer();
+		if (callback) {
+			callback();
+		}
+		return;
+	}
+	changeCheckState(getChatAtIndex(index));
+}
+
+QRect ShareBox::Inner::storyRepostRect() const {
+	const auto size = _st.item.checkbox.imageRadius * 2;
+	const auto photoLeft = (_rowWidth - size) / 2;
+	return QRect(
+		_rowsLeft + photoLeft,
+		_rowsTop + st::sharePhotoTop,
+		size,
+		size);
+}
+
+void ShareBox::Inner::paintStoryRepost(Painter &p) {
+	const auto outerWidth = width();
+	const auto circleRect = storyRepostRect();
+	const auto x = _rowsLeft;
+	const auto y = _rowsTop;
+	const auto size = circleRect.width();
+
+	auto hq = PainterHighQualityEnabler(p);
+	auto gradient = QLinearGradient(
+		circleRect.topLeft(),
+		circleRect.bottomRight());
+	gradient.setStops({
+		{ 0., st::groupCallMuted1->c },
+		{ 1., st::groupCallLive1->c },
+	});
+	p.setPen(Qt::NoPen);
+	p.setBrush(gradient);
+	p.drawEllipse(circleRect);
+
+	if (_storyRepostLottie) {
+		_storyRepostLottie->paintInCenter(p, circleRect);
+	}
+
+	const auto active = (_active == 0);
+	p.setPen(anim::pen(
+		_st.item.nameFg,
+		_st.item.nameFgChecked,
+		active ? 1. : 0.));
+
+	const auto nameWidth = (_rowWidth - st::shareColumnSkip);
+	const auto nameLeft = st::shareColumnSkip / 2;
+	const auto nameTop = st::sharePhotoTop + size + st::shareNameTop;
+	_storyRepostName.drawLeftElided(
+		p,
+		x + nameLeft,
+		y + nameTop,
+		nameWidth,
+		outerWidth,
+		2,
+		style::al_top,
+		0, -1, 0, true);
 }
 
 void ShareBox::Inner::resizeEvent(QResizeEvent *e) {
@@ -2211,7 +2345,7 @@ void FastShareMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
 		ShareBoxStyleOverrides st) {
-	FastShareMessage(controller->uiShow(), item, st);
+	FastShareMessage(controller->uiShow(), item, st, controller.get());
 }
 
 void FastShareLink(

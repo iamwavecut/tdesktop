@@ -774,6 +774,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 				| Flag::MutualContact
 				| Flag::DiscardMinPhoto
 				| Flag::StoriesHidden
+				| Flag::CloseFriend
 				: Flag());
 		const auto storiesState = minimal
 			? std::optional<Data::Stories::PeerSourceState>()
@@ -816,6 +817,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 					? Flag()
 					: Flag::DiscardMinPhoto)
 				| (data.is_stories_hidden() ? Flag::StoriesHidden : Flag())
+				| (data.is_close_friend() ? Flag::CloseFriend : Flag())
 				: Flag());
 		result->setFlags((result->flags() & ~flagsMask) | flagsSet);
 		result->setBotVerifyDetailsIcon(
@@ -2185,7 +2187,7 @@ bool Session::queryDocumentVisibility(
 }
 
 
-[[nodiscard]] auto Session::itemVisibilityQueries() const
+auto Session::itemVisibilityQueries() const
 -> rpl::producer<Session::ItemVisibilityQuery> {
 	return _itemVisibilityQueries.events();
 }

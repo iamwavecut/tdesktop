@@ -1090,6 +1090,11 @@ ChatWidget::ChatWidget(
 }
 
 ChatWidget::~ChatWidget() {
+	// Closing a preview restores composer text, so close before members die.
+	if (const auto box = _sendFilesBox.data()) {
+		box->closeBox();
+	}
+	_composeControls->closeSendAsFileBox();
 	if (_inner) {
 		_inner->setAboutView(nullptr);
 	}
@@ -2464,6 +2469,7 @@ void ChatWidget::sendVoice(const ComposeControls::VoiceToSend &data) {
 		data.waveform,
 		data.duration,
 		data.video,
+		data.videoSource,
 		std::move(action));
 
 	_composeControls->cancelReplyMessage();
