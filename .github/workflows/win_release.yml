@@ -306,6 +306,10 @@ jobs:
           # it reads live in the shared prefix, which has no stage of its own.
           [ -f "$LibrariesPath/nv-codec-headers/Makefile" ] \
             || drop nv-codec-headers "nv-codec-headers makefile missing"
+          [ -f "$LibrariesPath/tlottie/Cargo.toml" ] \
+            || drop tlottie "tlottie Cargo manifest missing"
+          [ -f "$LibrariesPath/wallet-engine/bindgen/cpp/bindgen/Cargo.toml" ] \
+            || drop wallet-engine "wallet-engine bindgen Cargo manifest missing"
           if [ -z "$(ls -A "$LibrariesPath/local/lib/pkgconfig" 2>/dev/null)" ]; then
             for lib in dav1d openh264 opus libvpx; do
               drop $lib "pkg-config files missing"
@@ -323,7 +327,9 @@ jobs:
         shell: bash
         run: |
           [ -d "$LibrariesPath" ] || { echo "nothing to clean up"; exit 0; }
-          find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/qt6_windows7/*' -o -path '*/yy_thunks/*' -o -path '*/nv-codec-headers/*' -o -path '*/gas-preprocessor/*' -o -path '*/src/wallet_engine/*' ')' -type f ')' -o -empty ')' -delete || true
+          find "$LibrariesPath" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/qt6_windows7/*' -o -path '*/yy_thunks/*' -o -path '*/nv-codec-headers/*' -o -path '*/gas-preprocessor/*' -o -path '*/src/wallet_engine/*' \
+            -o '(' '(' -path '*/tlottie/*' -o -path '*/wallet-engine/*' ')' ! -path '*/target/*' ')' \
+            ')' -type f ')' -o '(' -empty ! -path '*/tlottie/*' ! -path '*/wallet-engine/*' ')' ')' -delete || true
 
       - name: Save ThirdParty cache.
         if: always()
@@ -450,6 +456,9 @@ jobs:
           foreach ($name in @('Telegram.exe', 'Updater.exe')) {
             Copy-Item -LiteralPath (Join-Path $release $name) -Destination windows-build
           }
+          $helperDir = "modules\${env:MODULES_ARCH}"
+          New-Item -ItemType Directory -Path "windows-build\$helperDir" -Force | Out-Null
+          Copy-Item -LiteralPath "$release\$helperDir\TelegramWidgetHelper.exe" -Destination "windows-build\$helperDir"
           if ($env:WIN7_LAYER) {
             $modules = "modules\${env:MODULES_ARCH}\d3d"
             New-Item -ItemType Directory -Path "windows-build\$modules" -Force | Out-Null
@@ -491,6 +500,7 @@ jobs:
     env:
       TBUILD: ${{ github.workspace }}\TBuild
       REPO_NAME: tdesktop
+      MODULES_ARCH: ${{ matrix.arch == 'x64' && 'x64' || matrix.arch == 'arm64' && 'arm64' || 'x86' }}
       ISS_TARGET: ${{ matrix.arch == 'x64' && 'win64' || matrix.arch == 'arm64' && 'winarm' || 'win32' }}
       SETUP_PREFIX: ${{ matrix.arch == 'x64' && 'tsetup-x64' || matrix.arch == 'arm64' && 'tsetup-arm64' || 'tsetup' }}
 
@@ -551,8 +561,12 @@ jobs:
           if (-not (Test-Path (Join-Path $release 'Telegram.exe'))) {
             Write-Error "Telegram.exe is missing from $release"; exit 1
           }
-          $targets = @('Telegram.exe', 'Updater.exe') |
-            ForEach-Object { Join-Path $release $_ } | Where-Object { Test-Path $_ }
+          $helper = "modules\${env:MODULES_ARCH}\TelegramWidgetHelper.exe"
+          $targets = @('Telegram.exe', 'Updater.exe', $helper) |
+            ForEach-Object { Join-Path $release $_ }
+          foreach ($target in $targets) {
+            if (-not (Test-Path -LiteralPath $target)) { Write-Error "missing $target"; exit 1 }
+          }
 
           foreach ($target in $targets) {
             # Timestamping is what keeps a signature valid past certificate expiry.
@@ -692,7 +706,8 @@ jobs:
           Set-Location $release
 
           # Not $args: that is an automatic variable in PowerShell.
-          $packerArgs = @('-version', $env:AppVersion, '-path', 'Telegram.exe', '-path', 'Updater.exe')
+          $helper = "modules\${env:MODULES_ARCH}\TelegramWidgetHelper.exe"
+          $packerArgs = @('-version', $env:AppVersion, '-path', 'Telegram.exe', '-path', 'Updater.exe', '-path', $helper)
           if ($env:WIN7_LAYER) {
             $d3d = "modules\${env:MODULES_ARCH}\d3d\d3dcompiler_47.dll"
             if (-not (Test-Path $d3d)) { Write-Error "missing $d3d for ANGLE"; exit 1 }
@@ -719,6 +734,9 @@ jobs:
           New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
 
           Copy-Item (Join-Path $release 'Telegram.exe') $portableDir
+          $helperDir = "modules\${env:MODULES_ARCH}"
+          New-Item -ItemType Directory -Path "$portableDir\$helperDir" -Force | Out-Null
+          Copy-Item -LiteralPath "$release\$helperDir\TelegramWidgetHelper.exe" -Destination "$portableDir\$helperDir"
           if ($env:WIN7_LAYER) {
             $d3d = Join-Path $release "modules\${env:MODULES_ARCH}\d3d\d3dcompiler_47.dll"
             if (-not (Test-Path $d3d)) { Write-Error "missing $d3d for ANGLE"; exit 1 }

@@ -165,6 +165,7 @@ enum class GiftType : uchar {
 	ChatTheme,
 	BirthdaySuggest,
 	GiftOffer,
+	OnchainOffer,
 };
 
 struct GiftCode {

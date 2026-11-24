@@ -1010,6 +1010,10 @@ void ApiWrap::requestMoreDialogs(Data::Folder *folder) {
 		}, [&](const auto &data) {
 			_session->data().processUsers(data.vusers());
 			_session->data().processChats(data.vchats());
+			Data::ApplyResponseTopics(
+				&_session->data(),
+				data.vtopics(),
+				data.vmessages().v);
 			_session->data().applyDialogs(
 				folder,
 				data.vmessages().v,
@@ -1177,6 +1181,10 @@ mtpRequestId ApiWrap::sendPinnedDialogsRequest(
 		result.match([&](const MTPDmessages_peerDialogs &data) {
 			_session->data().processUsers(data.vusers());
 			_session->data().processChats(data.vchats());
+			Data::ApplyResponseTopics(
+				&_session->data(),
+				data.vtopics(),
+				data.vmessages().v);
 			_session->data().clearPinnedChats(folder);
 			_session->data().applyDialogs(
 				folder,
@@ -3096,6 +3104,16 @@ void ApiWrap::refreshFileReference(
 		request(MTPstories_GetStoriesByID(
 			_session->data().peer(data.peer)->input(),
 			MTP_vector<MTPint>(1, MTP_int(data.story))));
+	}, [&](const Data::FileOriginBotMediaPreview &data) {
+		const auto bot = _session->data().user(data.botId);
+		if (data.language) {
+			request(
+				MTPbots_GetPreviewInfo(
+					bot->inputUser(),
+					MTP_string(*data.language)));
+		} else {
+			request(MTPbots_GetPreviewMedias(bot->inputUser()));
+		}
 	}, [&](v::null_t) {
 		fail();
 	});
@@ -4396,6 +4414,7 @@ void ApiWrap::editMedia(
 		.archive = file.archive,
 		.idOverride = 0,
 		.displayName = file.displayName,
+		.temporaryPath = std::move(file.temporaryPath),
 	}));
 }
 

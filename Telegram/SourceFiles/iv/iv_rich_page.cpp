@@ -1783,6 +1783,7 @@ void AppendBlock(
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockBlockquoteBlocks &data) {
 		auto parsed = MakeBlock(BlockKind::Quote);
+		parsed.collapsed = data.is_collapsed();
 		{
 			const auto children = RichQuoteScope::BlockChildren(quote, index);
 			AppendBlocks(data.vblocks().v, &parsed.blocks, context);
@@ -2509,9 +2510,7 @@ template <typename Accumulator>
 			if (!CollectSimpleQuote(block, body)) {
 				return false;
 			}
-			to.appendQuote(
-				std::move(body),
-				block.collapsed && RichBlockquoteIsCollapsible(block));
+			to.appendQuote(std::move(body), block.collapsed);
 			break;
 		}
 		default:
