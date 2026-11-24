@@ -22,6 +22,13 @@ library and resource without a list of versions or filenames. It then signs and
 requires `codesign --verify --deep --strict` to succeed. Do not copy or modify
 bundle contents afterward without repeating finalization.
 
+The build signs `TelegramWidgetHelper` and embeds its identity in the client.
+Finalization uses `sign_mac.py` to preserve that helper's ad-hoc signature and
+check its hardened runtime and entitlements. Do not strip, edit or re-sign the
+helper after the build. A changed helper requires full packaging and
+installation. The fast installer rejects a helper that differs from the
+installed copy.
+
 ## Build and full packaging
 
 Follow the dependency deployment and install-name repair steps in the

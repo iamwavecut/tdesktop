@@ -63,12 +63,21 @@ def check_permissions(app, paths):
 def verify(app, paths):
     check_permissions(app, paths)
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+    if has_widget_helper(app):
+        subprocess.run([sys.executable, str(Path(__file__).with_name("sign_mac.py")), str(app), "--check"], check=True)
+
+
+def has_widget_helper(app):
+    return (app / "Contents/Helpers/TelegramWidgetHelper").exists() or (
+        app / "Contents/XPCServices/TelegramWidgetHelper.xpc").exists()
 
 
 def finalize(app, paths, deep_sign):
     subprocess.run(["chmod", "-R", "a+rX", str(app)], check=True)
     check_permissions(app, paths)
-    if deep_sign:
+    if deep_sign and has_widget_helper(app):
+        subprocess.run([sys.executable, str(Path(__file__).with_name("sign_mac.py")), str(app), "--identity", "-"], check=True)
+    elif deep_sign:
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
     else:
         subprocess.run(["codesign", "--force", "--sign", "-", str(app / "Contents/MacOS/Forkgram")], check=True)

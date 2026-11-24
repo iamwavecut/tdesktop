@@ -113,6 +113,7 @@ NeedCommand install_name_tool
 NeedCommand otool
 NeedCommand shasum
 NeedCommand python3
+NeedCommand cmp
 [[ -n "$verify_user" ]] || Error "verification user must not be empty"
 
 cd "$repo_root"
@@ -133,6 +134,13 @@ installed_info="$installed_app/Contents/Info.plist"
 [[ -d "$installed_app/Contents/MacOS" ]] || Error "installed app has no Contents/MacOS directory: $installed_app"
 python3 "$bundle_tool" validate "$source_app"
 python3 "$bundle_tool" validate "$installed_app"
+
+source_helper="$source_app/Contents/Helpers/TelegramWidgetHelper"
+installed_helper="$installed_app/Contents/Helpers/TelegramWidgetHelper"
+if [[ -e "$source_helper" || -e "$installed_helper" ]]; then
+  cmp -s "$source_helper" "$installed_helper" \
+    || Error "widget helper changed; run full packaging and installation first"
+fi
 
 if pgrep -x Forkgram >/dev/null 2>&1; then
   Error "Forkgram is running. Quit it before replacing $installed_binary"
